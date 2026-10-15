@@ -180,4 +180,60 @@ export class AdminController {
 
     res.status(200).json({ logs: rows });
   }
+
+  /**
+   * Get Gemini AI Configuration
+   */
+  static async getAiSettings(req: Request, res: Response): Promise<void> {
+    const summary = GeminiService.getAiConfigSummary();
+    res.status(200).json(summary);
+  }
+
+  /**
+   * Update Gemini AI Configuration (API Key & Model)
+   */
+  static async updateAiSettings(req: Request, res: Response): Promise<void> {
+    const schema = z.object({
+      apiKey: z.string().optional(),
+      modelName: z.string().optional(),
+      embeddingModel: z.string().optional(),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Dữ liệu cấu hình AI không hợp lệ.' });
+      return;
+    }
+
+    const { apiKey, modelName, embeddingModel } = parsed.data;
+    await GeminiService.updateAiConfig({ apiKey, modelName, embeddingModel });
+
+    // Log admin action
+    await query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
+       VALUES ($1, 'UPDATE_AI_CONFIG', 'system', 'gemini_ai', $2, $3)`,
+      [
+        req.user?.id || null,
+        JSON.stringify({
+          modelName,
+          hasNewApiKey: !!(apiKey && apiKey.trim() !== ''),
+        }),
+        req.ip,
+      ]
+    );
+
+    res.status(200).json({
+      message: 'Đã cập nhật cấu hình Google Gemini AI thành công.',
+      config: GeminiService.getAiConfigSummary(),
+    });
+  }
+
+  /**
+   * Test connection to Gemini API with selected model
+   */
+  static async testAiConnection(req: Request, res: Response): Promise<void> {
+    const { apiKey, modelName } = req.body;
+    const result = await GeminiService.testConnection(apiKey, modelName);
+    res.status(result.success ? 200 : 400).json(result);
+  }
 }

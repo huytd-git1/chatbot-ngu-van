@@ -1,6 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { env } from '../config/env.js';
 
+import { query } from '../db/pool.js';
+
 export interface FileCitationMeta {
   fileName: string;
   sourceText?: string;
@@ -16,20 +18,177 @@ export interface RagResult {
   toolActuallyUsed: boolean;
 }
 
+export interface SupportedModel {
+  id: string;
+  name: string;
+  description: string;
+  badge?: string;
+}
+
 export class GeminiService {
   private static genAiClient: GoogleGenAI | null = null;
+  private static activeApiKey: string = env.GEMINI_API_KEY || '';
+  private static activeModel: string = env.GEMINI_MODEL || 'gemini-3.8-flash';
+  private static activeEmbeddingModel: string = env.GEMINI_EMBEDDING_MODEL || 'models/gemini-embedding-2';
+
+  public static readonly SUPPORTED_MODELS: SupportedModel[] = [
+    {
+      id: 'gemini-3.8-flash',
+      name: 'Gemini 3.8 Flash',
+      description: 'Mô hình thế hệ mới nhất, tốc độ cao, hỗ trợ File Search và Grounding tốt nhất cho giáo dục',
+      badge: 'Khuyên dùng',
+    },
+    {
+      id: 'gemini-2.5-flash',
+      name: 'Gemini 2.5 Flash',
+      description: 'Phản hồi nhanh, tối ưu chi phí, hiệu năng ổn định',
+    },
+    {
+      id: 'gemini-2.5-pro',
+      name: 'Gemini 2.5 Pro',
+      description: 'Mô hình tư duy chuyên sâu, phân tích tác phẩm và nhân vật văn học đỉnh cao',
+      badge: 'Chuyên sâu',
+    },
+  ];
+
+  public static async initFromDb(): Promise<void> {
+    try {
+      const { rows } = await query<{
+        api_key: string | null;
+        model_name: string | null;
+        embedding_model: string | null;
+      }>(`SELECT api_key, model_name, embedding_model FROM ai_settings WHERE id = 'default'`);
+
+      if (rows.length > 0) {
+        if (rows[0].api_key && rows[0].api_key.trim() !== '') {
+          this.activeApiKey = rows[0].api_key.trim();
+        }
+        if (rows[0].model_name && rows[0].model_name.trim() !== '') {
+          this.activeModel = rows[0].model_name.trim();
+        }
+        if (rows[0].embedding_model && rows[0].embedding_model.trim() !== '') {
+          this.activeEmbeddingModel = rows[0].embedding_model.trim();
+        }
+      }
+      this.genAiClient = null; // Re-initialize on next demand
+      console.log(`[GeminiService] AI Config loaded: Model=${this.activeModel}, LiveAPI=${this.isLiveApiConfigured()}`);
+    } catch (err) {
+      console.warn('[GeminiService] Could not load ai_settings from DB, using env fallback:', err);
+    }
+  }
+
+  public static getAiConfigSummary() {
+    const isLive = this.isLiveApiConfigured();
+    let maskedKey = '';
+    if (this.activeApiKey && this.activeApiKey.length >= 8) {
+      maskedKey = `${this.activeApiKey.substring(0, 6)}...${this.activeApiKey.slice(-4)}`;
+    } else if (this.activeApiKey) {
+      maskedKey = '***';
+    }
+
+    return {
+      isLiveConfigured: isLive,
+      activeModel: this.activeModel,
+      activeEmbeddingModel: this.activeEmbeddingModel,
+      maskedApiKey: maskedKey,
+      hasApiKey: !!this.activeApiKey,
+      supportedModels: this.SUPPORTED_MODELS,
+    };
+  }
+
+  public static async updateAiConfig(params: {
+    apiKey?: string;
+    modelName?: string;
+    embeddingModel?: string;
+  }): Promise<void> {
+    const { apiKey, modelName, embeddingModel } = params;
+
+    if (apiKey !== undefined && apiKey.trim() !== '') {
+      this.activeApiKey = apiKey.trim();
+    }
+    if (modelName !== undefined && modelName.trim() !== '') {
+      this.activeModel = modelName.trim();
+    }
+    if (embeddingModel !== undefined && embeddingModel.trim() !== '') {
+      this.activeEmbeddingModel = embeddingModel.trim();
+    }
+
+    this.genAiClient = null; // Reset client
+
+    // Persist to DB
+    await query(
+      `INSERT INTO ai_settings (id, api_key, model_name, embedding_model, updated_at)
+       VALUES ('default', $1, $2, $3, NOW())
+       ON CONFLICT (id) DO UPDATE
+       SET api_key = COALESCE($1, ai_settings.api_key),
+           model_name = COALESCE($2, ai_settings.model_name),
+           embedding_model = COALESCE($3, ai_settings.embedding_model),
+           updated_at = NOW()`,
+      [
+        apiKey !== undefined ? (apiKey.trim() || null) : null,
+        modelName !== undefined ? modelName.trim() : null,
+        embeddingModel !== undefined ? embeddingModel.trim() : null,
+      ]
+    );
+  }
+
+  public static async testConnection(customApiKey?: string, customModel?: string): Promise<{
+    success: boolean;
+    message: string;
+    modelUsed: string;
+    responseTimeMs?: number;
+    error?: string;
+  }> {
+    const keyToTest = (customApiKey && customApiKey.trim() !== '') ? customApiKey.trim() : this.activeApiKey;
+    const modelToTest = (customModel && customModel.trim() !== '') ? customModel.trim() : this.activeModel;
+
+    if (!keyToTest) {
+      return {
+        success: false,
+        message: 'Chưa có Gemini API Key. Vui lòng nhập API Key để kiểm tra kết nối.',
+        modelUsed: modelToTest,
+        error: 'API Key is missing',
+      };
+    }
+
+    const startTime = Date.now();
+    try {
+      const testClient = new GoogleGenAI({ apiKey: keyToTest });
+      const response = await testClient.models.generateContent({
+        model: modelToTest,
+        contents: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
+      });
+
+      const responseTimeMs = Date.now() - startTime;
+      const responseText = response.text || 'Kết nối thành công.';
+
+      return {
+        success: true,
+        message: `Kết nối thành công tới mô hình ${modelToTest}! Phản hồi: "${responseText.trim()}"`,
+        modelUsed: modelToTest,
+        responseTimeMs,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Kiểm tra kết nối thất bại: ${err.message || 'Lỗi không xác định khi gọi Gemini API'}`,
+        modelUsed: modelToTest,
+        error: err.message,
+      };
+    }
+  }
 
   private static getClient(): GoogleGenAI | null {
     if (this.genAiClient) return this.genAiClient;
-    if (env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim() !== '') {
-      this.genAiClient = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+    if (this.activeApiKey && this.activeApiKey.trim() !== '') {
+      this.genAiClient = new GoogleGenAI({ apiKey: this.activeApiKey });
       return this.genAiClient;
     }
     return null;
   }
 
   public static isLiveApiConfigured(): boolean {
-    return !!(env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim() !== '');
+    return !!(this.activeApiKey && this.activeApiKey.trim() !== '');
   }
 
   /**
@@ -47,7 +206,7 @@ export class GeminiService {
       const store = await client.fileSearchStores.create({
         config: {
           displayName,
-          embeddingModel: env.GEMINI_EMBEDDING_MODEL,
+          embeddingModel: this.activeEmbeddingModel,
         },
       });
       return store.name ?? `fileSearchStores/${displayName}`;
@@ -249,7 +408,7 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
         : [];
 
       const interaction = await client.interactions.create({
-        model: env.GEMINI_MODEL,
+        model: this.activeModel,
         input: studentQuestion,
         tools: tools as any,
         systemInstruction,

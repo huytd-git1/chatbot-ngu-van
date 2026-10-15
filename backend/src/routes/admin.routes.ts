@@ -16,4 +16,8 @@ adminRouter.put('/teachers/:teacherId/classes', AdminController.assignClasses);
 adminRouter.get('/settings', AdminController.getSystemSettings);
 adminRouter.put('/settings', AdminController.updateSystemSettings);
 
+adminRouter.get('/ai-settings', AdminController.getAiSettings);
+adminRouter.put('/ai-settings', AdminController.updateAiSettings);
+adminRouter.post('/ai-settings/test', AdminController.testAiConnection);
+
 adminRouter.get('/audit-logs', AdminController.getAuditLogs);

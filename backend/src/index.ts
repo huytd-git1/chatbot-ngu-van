@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { runMigrations } from './db/migrate.js';
 import { seedDatabase } from './db/seed.js';
 import { DocumentService } from './services/document.service.js';
+import { GeminiService } from './services/gemini.service.js';
 
 async function bootstrap() {
   try {
@@ -14,7 +15,10 @@ async function bootstrap() {
       await seedDatabase();
     }
 
-    // 2. Reconcile unfinished background indexing jobs
+    // 2. Load dynamic AI settings
+    await GeminiService.initFromDb();
+
+    // 3. Reconcile unfinished background indexing jobs
     await DocumentService.reconcilePendingJobs();
 
     // 3. Start server

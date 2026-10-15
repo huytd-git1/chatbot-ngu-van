@@ -216,6 +216,15 @@ export async function runMigrations() {
     );
     CREATE INDEX IF NOT EXISTS idx_audit_user_action ON audit_logs(user_id, action);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+    `,
+    `
+    CREATE TABLE IF NOT EXISTS ai_settings (
+      id VARCHAR(50) PRIMARY KEY DEFAULT 'default',
+      api_key TEXT,
+      model_name VARCHAR(100) DEFAULT 'gemini-3.8-flash',
+      embedding_model VARCHAR(100) DEFAULT 'models/gemini-embedding-2',
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
     `
   ];
 
@@ -233,6 +242,13 @@ export async function runMigrations() {
     INSERT INTO quota_settings (scope_type, scope_id, daily_limit, system_hard_cap, is_kill_switch_active)
     VALUES ('system', 'default', 20, 5000, FALSE)
     ON CONFLICT (scope_type, scope_id) DO NOTHING;
+  `);
+
+  // Ensure default AI settings row exists
+  await query(`
+    INSERT INTO ai_settings (id, model_name, embedding_model)
+    VALUES ('default', 'gemini-3.8-flash', 'models/gemini-embedding-2')
+    ON CONFLICT (id) DO NOTHING;
   `);
 
   console.log('[Migration] All migrations completed successfully.');
