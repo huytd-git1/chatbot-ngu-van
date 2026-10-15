@@ -1,0 +1,23 @@
+import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
+import { StudentController } from '../controllers/student.controller.js';
+import { authMiddleware, requireRole } from '../middlewares/auth.middleware.js';
+
+export const studentRouter = Router();
+
+// Chat rate limiter: max 30 questions per 5 minutes per user/IP
+const chatLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  message: { error: 'Bạn thao tác quá nhanh. Vui lòng chậm lại một chút để suy ngẫm nhé!' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+studentRouter.use(authMiddleware(true));
+// Allow student, teacher_test and admin to access student RAG interface
+studentRouter.get('/works', StudentController.getAssignedWorks);
+studentRouter.get('/quota', StudentController.getQuota);
+studentRouter.post('/ask', chatLimiter, StudentController.askQuestion);
+studentRouter.get('/history', StudentController.getHistory);
+studentRouter.delete('/history', StudentController.clearHistory);
