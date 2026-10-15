@@ -88,16 +88,17 @@ export class DocumentService {
     const storeDisplayName = `work_${workId}_store`;
     const storeName = await GeminiService.createFileSearchStore(storeDisplayName);
 
-    // 4. Save document record as 'indexing'
+    // 4. Save document record (if rawContent exists like TXT, it is immediately ready for RAG)
+    const initialStatus = rawContent ? 'ready' : 'indexing';
     const docRes = await query<DocumentRow>(
       `INSERT INTO documents (work_id, title, doc_type, file_name, file_search_store_name, file_size_bytes, mime_type, status, raw_content, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'indexing', $8, $9)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id, status`,
-      [workId, title, docType, file.originalname, storeName, file.size, file.mimetype, rawContent, userId]
+      [workId, title, docType, file.originalname, storeName, file.size, file.mimetype, initialStatus, rawContent, userId]
     );
     const documentId = docRes.rows[0].id;
 
-    // 5. Send file to Gemini File Search Store
+    // 5. Send file to Gemini File Search Store asynchronously
     try {
       const { operationName, geminiFileName } = await GeminiService.uploadToFileSearchStore(
         storeName,
@@ -118,16 +119,21 @@ export class DocumentService {
         [geminiFileName, documentId]
       );
 
-      // Asynchronously trigger check
-      this.pollJob(documentId, operationName).catch(() => {});
+      // Asynchronously trigger check if not already ready
+      if (initialStatus !== 'ready') {
+        this.pollJob(documentId, operationName).catch(() => {});
+      }
 
-      return { documentId, status: 'indexing' };
+      return { documentId, status: initialStatus };
     } catch (err: any) {
-      await query(
-        `UPDATE documents SET status = 'failed' WHERE id = $1`,
-        [documentId]
-      );
-      throw err;
+      if (!rawContent) {
+        await query(
+          `UPDATE documents SET status = 'failed' WHERE id = $1`,
+          [documentId]
+        );
+        throw err;
+      }
+      return { documentId, status: 'ready' };
     }
   }
 
