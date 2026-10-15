@@ -110,6 +110,11 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
     // Generate unique idempotency key
     const idempotencyKey = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
+    const recentHistory = messages.slice(-6).map((m) => ({
+      sender: m.sender,
+      text: m.text,
+    }));
+
     try {
       const res = await apiRequest<{
         answer: string;
@@ -125,6 +130,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
           question: textToSend,
           learningMode,
           idempotencyKey,
+          history: recentHistory,
         }),
       });
 
@@ -353,10 +359,17 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                 {/* AI Model Badge */}
                 {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
                   <div className="mt-2 pt-2 border-t border-slate-200/50 flex items-center justify-between text-[10px] sm:text-[11px]">
-                    <span className="flex items-center gap-1 text-emerald-700 font-medium">
-                      <Sparkles className="w-3 h-3 text-amber-500" />
-                      {msg.modelUsed ? `Google Gemini AI (${msg.modelUsed})` : 'Google Gemini AI'}
-                    </span>
+                    {msg.isLiveAi ? (
+                      <span className="flex items-center gap-1 text-emerald-700 font-medium">
+                        <Sparkles className="w-3 h-3 text-amber-500" />
+                        Google Gemini AI ({msg.modelUsed || 'Live'})
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-amber-900/80 font-medium bg-amber-50/80 px-2 py-0.5 rounded-md border border-amber-200/60" title="Chế độ phân tích tài liệu bài học trực tiếp">
+                        <BookOpen className="w-3 h-3 text-amber-700" />
+                        {msg.modelUsed || 'Tài liệu giáo viên (Ngoại tuyến)'}
+                      </span>
+                    )}
                     <span className="text-[10px] text-slate-400 font-mono">
                       {msg.isNoSource ? 'Chưa đủ căn cứ' : 'RAG Grounded ✓'}
                     </span>
