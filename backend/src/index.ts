@@ -2,6 +2,7 @@ import { app } from './app.js';
 import { env } from './config/env.js';
 import { runMigrations } from './db/migrate.js';
 import { seedDatabase } from './db/seed.js';
+import { query } from './db/pool.js';
 import { DocumentService } from './services/document.service.js';
 import { GeminiService } from './services/gemini.service.js';
 
@@ -9,10 +10,18 @@ async function bootstrap() {
   try {
     console.log(`[Server] Khởi động "Cô Dương dạy văn dễ thương" trên cổng ${env.PORT}...`);
 
-    // 1. Run migrations & auto seed for memory DB
+    // 1. Run migrations & auto seed if users table is empty
     await runMigrations();
-    if (env.DATABASE_URL === 'memory') {
-      await seedDatabase();
+    try {
+      const { rows: userRows } = await query(`SELECT COUNT(*) as count FROM users`);
+      if (parseInt(userRows[0]?.count || '0', 10) === 0) {
+        console.log('[Server] Chưa có tài khoản, tự động nạp dữ liệu mẫu ban đầu...');
+        await seedDatabase();
+      }
+    } catch {
+      if (env.DATABASE_URL === 'memory') {
+        await seedDatabase();
+      }
     }
 
     // 2. Load dynamic AI settings
