@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Send, Sparkles, BookOpen,
   Trash2, ShieldCheck, Info, FileText, ChevronDown, ChevronUp, Loader2,
-  HelpCircle, UserCheck, ListOrdered, CheckSquare, MessageSquareText, Compass
+  HelpCircle, UserCheck, ListOrdered, CheckSquare, MessageSquareText, Compass,
+  MessageSquarePlus
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import type { Work, ChatMessage, LearningMode, QuotaInfo } from '../types.js';
+import type { Work, ChatMessage, LearningMode, QuotaInfo, User } from '../types.js';
 import { apiRequest } from '../api/client.js';
 import { getWorkSuggestions } from '../utils/suggestions.js';
 
@@ -14,15 +15,15 @@ interface StudentChatProps {
   works: Work[];
   quota: QuotaInfo | null;
   onRefreshQuota: () => void;
+  currentUser?: User | null;
 }
 
-export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefreshQuota }) => {
+export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefreshQuota, currentUser }) => {
   const [selectedWorkId, setSelectedWorkId] = useState<string>('');
   const [learningMode, setLearningMode] = useState<LearningMode>('qa');
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [saveLocalHistory, setSaveLocalHistory] = useState(true);
   const [openCitationIdx, setOpenCitationIdx] = useState<number | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -35,32 +36,38 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
     }
   }, [works, selectedWorkId]);
 
-  // Load message history from backend on initial mount
+  // Session-based chat storage key for active account and work
+  const sessionKey = useMemo(() => {
+    return `chat_session_${currentUser?.id || 'guest'}_${selectedWorkId || 'default'}`;
+  }, [currentUser?.id, selectedWorkId]);
+
+  // Load message history for the current session only
   useEffect(() => {
-    if (!saveLocalHistory) return;
-    apiRequest<{ history: any[] }>('/api/student/history')
-      .then((data) => {
-        if (data.history && data.history.length > 0) {
-          const loaded: ChatMessage[] = [];
-          for (const item of data.history.reverse()) {
-            let citations = [];
-            try {
-              citations = item.citations_meta ? JSON.parse(item.citations_meta) : [];
-            } catch {}
-            loaded.push({
-              id: item.id,
-              sender: 'ai',
-              text: item.response_text || 'Đã lưu phản hồi',
-              citations,
-              isNoSource: item.status === 'no_source',
-              timestamp: new Date(item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-            });
-          }
-          setMessages(loaded);
+    if (!sessionKey) return;
+    try {
+      const saved = sessionStorage.getItem(sessionKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setMessages(parsed);
+          return;
         }
-      })
-      .catch(() => {});
-  }, [saveLocalHistory]);
+      }
+    } catch {}
+    setMessages([]);
+  }, [sessionKey]);
+
+  // Save messages to current session storage
+  useEffect(() => {
+    if (!sessionKey) return;
+    try {
+      if (messages.length > 0) {
+        sessionStorage.setItem(sessionKey, JSON.stringify(messages));
+      } else {
+        sessionStorage.removeItem(sessionKey);
+      }
+    } catch {}
+  }, [messages, sessionKey]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -162,14 +169,23 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
     }
   };
 
-  const handleClearHistory = async () => {
-    if (!confirm('Em có chắc chắn muốn xóa toàn bộ lịch sử hỏi đáp của tài khoản này trên thiết bị?')) return;
-    try {
-      await apiRequest('/api/student/history', { method: 'DELETE' });
-      setMessages([]);
-    } catch (err: any) {
-      alert(err.message || 'Không thể xóa lịch sử');
+  const handleNewSession = () => {
+    if (messages.length > 0 && !confirm('Em có muốn bắt đầu một phiên trò chuyện mới cho tác phẩm này? Khung chat sẽ được làm mới về ban đầu.')) {
+      return;
     }
+    setMessages([]);
+    try {
+      sessionStorage.removeItem(sessionKey);
+    } catch {}
+  };
+
+  const handleClearHistory = async () => {
+    if (!confirm('Em có chắc chắn muốn xóa tin nhắn trong phiên trò chuyện này?')) return;
+    setMessages([]);
+    try {
+      sessionStorage.removeItem(sessionKey);
+      await apiRequest('/api/student/history', { method: 'DELETE' });
+    } catch {}
   };
 
   return (
@@ -426,23 +442,21 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
             </strong>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <label className="flex items-center gap-1 cursor-pointer hover:text-slate-700">
-              <input
-                type="checkbox"
-                checked={saveLocalHistory}
-                onChange={(e) => setSaveLocalHistory(e.target.checked)}
-                className="rounded text-[#0f2942] w-3 h-3"
-              />
-              <span className="hidden sm:inline">Lưu trên máy này</span>
-              <span className="sm:hidden">Lưu máy</span>
-            </label>
+            <button
+              onClick={handleNewSession}
+              title="Bắt đầu phiên trò chuyện mới (làm mới khung chat)"
+              className="flex items-center gap-1 text-[#0f2942] hover:text-amber-800 font-semibold transition-colors px-2 py-0.5 rounded-md hover:bg-amber-50"
+            >
+              <MessageSquarePlus className="w-3.5 h-3.5 text-amber-700" />
+              <span>Phiên mới</span>
+            </button>
             <button
               onClick={handleClearHistory}
-              title="Xóa lịch sử trên thiết bị này"
-              className="hover:text-red-600 flex items-center gap-1 transition-colors text-slate-400 hover:text-red-600"
+              title="Xóa tin nhắn trong phiên này"
+              className="flex items-center gap-1 text-slate-400 hover:text-red-600 transition-colors px-1.5 py-0.5 rounded-md hover:bg-red-50"
             >
               <Trash2 className="w-3 h-3" />
-              <span className="hidden sm:inline">Xóa lịch sử</span>
+              <span className="hidden sm:inline">Xóa</span>
             </button>
           </div>
         </div>

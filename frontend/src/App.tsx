@@ -77,6 +77,9 @@ export const App: React.FC = () => {
     try {
       await apiRequest('/api/auth/logout', { method: 'POST' });
     } catch {}
+    try {
+      sessionStorage.clear();
+    } catch {}
     setUser(null);
     setQuota(null);
     setWorks([]);
@@ -131,6 +134,7 @@ export const App: React.FC = () => {
             works={works}
             quota={quota}
             onRefreshQuota={refreshQuota}
+            currentUser={user}
           />
         )}
 
