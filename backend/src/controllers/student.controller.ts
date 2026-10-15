@@ -237,6 +237,8 @@ export class StudentController {
         isNoSource: ragResult.isNoSource,
         toolConfigured: ragResult.toolConfigured,
         toolActuallyUsed: ragResult.toolActuallyUsed,
+        modelUsed: GeminiService.getAiConfigSummary().activeModel,
+        isLiveAi: GeminiService.isLiveApiConfigured(),
       });
     } catch (err: any) {
       console.error('[StudentController] RAG query failed:', err);

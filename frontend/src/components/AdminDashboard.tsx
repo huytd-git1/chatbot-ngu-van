@@ -391,23 +391,40 @@ export const AdminDashboard: React.FC = () => {
           )}
 
           <form onSubmit={handleSaveAiSettings} className="space-y-5">
+            {/* Prominent Active Saved Key Card */}
+            {hasSavedKey && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
+                      Đã lưu & Kích hoạt Gemini API Key thành công!
+                    </div>
+                    <div className="text-[11px] text-emerald-700 font-mono mt-0.5">
+                      Khóa đang chạy thực tế: <span className="bg-white/80 px-2 py-0.5 rounded font-bold border border-emerald-200">{maskedApiKey}</span>
+                    </div>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-full text-[10px] font-bold tracking-wide uppercase">
+                  Live Active
+                </span>
+              </div>
+            )}
+
             {/* API Key input */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-700">
-                  Google Gemini API Key:
+                  {hasSavedKey ? 'Nhập khóa API mới nếu muốn thay đổi:' : 'Nhập Google Gemini API Key:'}
                 </label>
-                {hasSavedKey && (
-                  <span className="text-[11px] text-slate-500 font-mono">
-                    Đang lưu: <span className="bg-slate-100 px-1.5 py-0.5 rounded text-amber-900 font-semibold">{maskedApiKey}</span>
-                  </span>
-                )}
               </div>
 
               <div className="relative">
                 <input
                   type={showApiKey ? 'text' : 'password'}
-                  placeholder={hasSavedKey ? 'Nhập khóa mới nếu muốn thay đổi (bỏ trống nếu giữ nguyên)...' : 'AIzaSy... (Lấy tại aistudio.google.com)'}
+                  placeholder={hasSavedKey ? `Đang dùng khóa (${maskedApiKey}) - Để trống nếu giữ nguyên` : 'AIzaSy... (Lấy tại aistudio.google.com)'}
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
                   className="w-full text-xs p-2.5 pr-10 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none"

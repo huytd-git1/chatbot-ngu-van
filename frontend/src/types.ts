@@ -80,6 +80,8 @@ export interface ChatMessage {
   citations?: FileCitation[];
   isNoSource?: boolean;
   toolActuallyUsed?: boolean;
+  modelUsed?: string;
+  isLiveAi?: boolean;
   timestamp: string;
 }
 

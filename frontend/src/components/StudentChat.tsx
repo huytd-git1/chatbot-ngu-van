@@ -103,6 +103,8 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         citations: Array<{ fileName: string; sourceText?: string }>;
         isNoSource: boolean;
         toolActuallyUsed: boolean;
+        modelUsed?: string;
+        isLiveAi?: boolean;
       }>('/api/student/ask', {
         method: 'POST',
         body: JSON.stringify({
@@ -120,6 +122,8 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         citations: res.citations || [],
         isNoSource: res.isNoSource,
         toolActuallyUsed: res.toolActuallyUsed,
+        modelUsed: res.modelUsed,
+        isLiveAi: res.isLiveAi,
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       };
 
@@ -298,6 +302,19 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                         ))}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* AI Model Badge */}
+                {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex items-center justify-between text-[11px]">
+                    <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                      {msg.modelUsed ? `Google Gemini AI (${msg.modelUsed})` : 'Google Gemini AI'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {msg.isNoSource ? 'Chưa đủ căn cứ' : 'RAG Grounded ✓'}
+                    </span>
                   </div>
                 )}
               </div>
