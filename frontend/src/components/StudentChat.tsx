@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Send, Sparkles, BookOpen,
-  Trash2, ShieldCheck, Info, FileText, ChevronDown, ChevronUp, Loader2
+  Trash2, ShieldCheck, Info, FileText, ChevronDown, ChevronUp, Loader2,
+  HelpCircle, UserCheck, ListOrdered, CheckSquare, MessageSquareText, Compass
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import type { Work, ChatMessage, LearningMode, QuotaInfo } from '../types.js';
 import { apiRequest } from '../api/client.js';
+import { getWorkSuggestions } from '../utils/suggestions.js';
 
 interface StudentChatProps {
   works: Work[];
@@ -24,13 +26,14 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   const [openCitationIdx, setOpenCitationIdx] = useState<number | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-select first active work
   useEffect(() => {
     if (works.length > 0 && !selectedWorkId) {
       setSelectedWorkId(works[0].id);
     }
-  }, [works]);
+  }, [works, selectedWorkId]);
 
   // Load message history from backend on initial mount
   useEffect(() => {
@@ -65,13 +68,18 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
   const activeWork = works.find(w => w.id === selectedWorkId);
 
+  // Dynamic suggestions tailored to the active literary work & mode
+  const suggestions = useMemo(() => {
+    return getWorkSuggestions(activeWork, learningMode);
+  }, [activeWork, learningMode]);
+
   const learningModeConfigs = [
-    { id: 'qa', label: 'Hỏi đáp tác phẩm', desc: 'Giải đáp thấu đáo dựa trên tài liệu' },
-    { id: 'character_analysis', label: 'Phân tích nhân vật', desc: '4 bước: Luận điểm - Dẫn chứng - Phân tích - Nhận xét' },
-    { id: 'outline', label: 'Gợi ý dàn ý', desc: 'Mở - Thân - Kết (cô không viết thay cả bài)' },
-    { id: 'reading_comprehension', label: 'Luyện đọc hiểu', desc: 'Hỏi và chờ em trả lời từng câu một' },
-    { id: 'essay_feedback', label: 'Góp ý bài viết', desc: 'Giữ nguyên văn phong và cảm xúc của em' },
-    { id: 'prep_and_review', label: 'Soạn bài & Ôn tập', desc: 'Theo mục tiêu bài học thầy cô giao' },
+    { id: 'qa', label: 'Hỏi đáp tác phẩm', shortLabel: 'Hỏi đáp', icon: HelpCircle, desc: 'Giải đáp thấu đáo dựa trên tài liệu' },
+    { id: 'character_analysis', label: 'Phân tích nhân vật', shortLabel: 'Nhân vật', icon: UserCheck, desc: '4 bước: Luận điểm - Dẫn chứng - Phân tích - Nhận xét' },
+    { id: 'outline', label: 'Gợi ý dàn ý', shortLabel: 'Dàn ý', icon: ListOrdered, desc: 'Mở - Thân - Kết (cô không viết thay cả bài)' },
+    { id: 'reading_comprehension', label: 'Luyện đọc hiểu', shortLabel: 'Đọc hiểu', icon: Compass, desc: 'Hỏi và chờ em trả lời từng câu một' },
+    { id: 'essay_feedback', label: 'Góp ý bài viết', shortLabel: 'Góp ý bài', icon: MessageSquareText, desc: 'Giữ nguyên văn phong và cảm xúc của em' },
+    { id: 'prep_and_review', label: 'Soạn bài & Ôn tập', shortLabel: 'Soạn & Ôn', icon: CheckSquare, desc: 'Theo mục tiêu bài học thầy cô giao' },
   ];
 
   const handleSend = async (customPrompt?: string) => {
@@ -93,6 +101,11 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
     setMessages(prev => [...prev, clientMsg]);
     setQuestion('');
     setIsLoading(true);
+
+    // Reset textarea height on mobile
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     // Generate unique idempotency key
     const idempotencyKey = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
@@ -154,24 +167,22 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 flex flex-col h-[calc(100vh-5rem)]">
+    <div className="max-w-5xl mx-auto px-2 sm:px-4 py-2 sm:py-5 flex flex-col h-[calc(100dvh-4rem)] sm:h-[calc(100vh-4.75rem)] min-h-0">
       {/* Top Banner: Work selector & Disclaimers */}
-      <div className="bg-white rounded-2xl p-4 shadow-xs border border-[#e8e2d5] mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200">
-            <BookOpen className="w-5 h-5" />
+      <div className="bg-white rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 shadow-xs border border-[#e8e2d5] mb-2 sm:mb-3 shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shrink-0">
+            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-amber-800" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="work-select" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Tác phẩm đang học:
-              </label>
-            </div>
+          <div className="flex-1 min-w-0">
+            <label htmlFor="work-select" className="block text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              Tác phẩm đang học:
+            </label>
             <select
               id="work-select"
               value={selectedWorkId}
               onChange={(e) => setSelectedWorkId(e.target.value)}
-              className="mt-0.5 block w-full sm:w-64 font-bold text-[#0f2942] text-sm bg-transparent border-none focus:ring-0 cursor-pointer p-0"
+              className="mt-0.5 block w-full sm:w-72 font-bold text-[#0f2942] text-xs sm:text-sm bg-transparent border-none focus:ring-0 cursor-pointer p-0 truncate"
             >
               {works.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -183,61 +194,95 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         </div>
 
         {/* AI Pedagogical Disclaimer */}
-        <div className="flex items-center gap-2 text-xs text-slate-500 bg-[#fbf9f4] px-3 py-1.5 rounded-xl border border-[#e8e2d5]/60">
-          <Info className="w-4 h-4 text-amber-700 shrink-0" />
-          <span>Cô là trợ lý AI học tập, đồng hành và trả lời theo tài liệu giáo viên cung cấp.</span>
+        <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-slate-600 bg-[#fbf9f4] px-2.5 py-1.5 rounded-xl border border-[#e8e2d5]/70 shrink-0">
+          <Info className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+          <span className="truncate sm:whitespace-normal">Cô trả lời chuẩn theo tài liệu giáo viên đã cấp.</span>
         </div>
       </div>
 
-      {/* Learning Mode Switcher */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
-        {learningModeConfigs.map((m) => (
-          <button
-            key={m.id}
-            onClick={() => setLearningMode(m.id as LearningMode)}
-            title={m.desc}
-            className={`p-2 rounded-xl text-left border transition-all flex flex-col justify-between ${
-              learningMode === m.id
-                ? 'bg-[#0f2942] text-white border-[#0f2942] shadow-xs'
-                : 'bg-white hover:bg-amber-50/50 text-[#1c2530] border-[#e8e2d5]'
-            }`}
-          >
-            <span className="text-xs font-bold truncate">{m.label}</span>
-            <span className={`text-[10px] truncate mt-0.5 ${learningMode === m.id ? 'text-amber-200' : 'text-slate-400'}`}>
-              {m.desc.split(':')[0]}
-            </span>
-          </button>
-        ))}
+      {/* Learning Mode Switcher: Mobile Swipeable Strip + Desktop Grid */}
+      <div className="shrink-0 mb-2 sm:mb-3">
+        {/* Mobile Horizontal Scrollable Pills */}
+        <div className="sm:hidden flex overflow-x-auto no-scrollbar gap-1.5 pb-1 -mx-2 px-2 snap-x">
+          {learningModeConfigs.map((m) => {
+            const Icon = m.icon;
+            const isSelected = learningMode === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setLearningMode(m.id as LearningMode)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap snap-start shrink-0 border transition-all ${
+                  isSelected
+                    ? 'bg-[#0f2942] text-white border-[#0f2942] shadow-xs'
+                    : 'bg-white hover:bg-amber-50/60 text-[#1c2530] border-[#e8e2d5]'
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-amber-300' : 'text-slate-500'}`} />
+                <span>{m.shortLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Desktop 6-Column Grid */}
+        <div className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {learningModeConfigs.map((m) => {
+            const Icon = m.icon;
+            const isSelected = learningMode === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setLearningMode(m.id as LearningMode)}
+                title={m.desc}
+                className={`p-2 rounded-xl text-left border transition-all flex flex-col justify-between ${
+                  isSelected
+                    ? 'bg-[#0f2942] text-white border-[#0f2942] shadow-xs'
+                    : 'bg-white hover:bg-amber-50/50 text-[#1c2530] border-[#e8e2d5]'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-amber-300' : 'text-slate-500'}`} />
+                  <span className="text-xs font-bold truncate">{m.label}</span>
+                </div>
+                <span className={`text-[10px] truncate mt-1 ${isSelected ? 'text-amber-200' : 'text-slate-400'}`}>
+                  {m.desc.split(':')[0]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Chat Messages Scroll Area */}
-      <div className="flex-1 bg-white rounded-2xl p-4 sm:p-6 overflow-y-auto shadow-xs border border-[#e8e2d5] space-y-4">
+      <div className="flex-1 min-h-0 bg-white rounded-xl sm:rounded-2xl p-3 sm:p-5 overflow-y-auto shadow-xs border border-[#e8e2d5] space-y-3 sm:space-y-4">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-10 px-4">
-            <div className="w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-800 mb-3 shadow-inner">
-              <Sparkles className="w-8 h-8 text-amber-700" />
+          <div className="flex flex-col items-center justify-center min-h-full text-center py-6 sm:py-10 px-2 sm:px-4">
+            <div className="w-13 h-13 sm:w-16 sm:h-16 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-800 mb-2.5 sm:mb-3 shadow-inner">
+              <Sparkles className="w-6 h-6 sm:w-8 sm:h-8 text-amber-700" />
             </div>
-            <h3 className="text-base font-bold text-[#0f2942]">Chào em! Cô Dương đây</h3>
-            <p className="text-xs text-slate-500 max-w-md mt-1 mb-6">
-              Em đang cùng cô tìm hiểu tác phẩm <strong>"{activeWork?.title}"</strong>. Hãy chọn chế độ học hoặc bấm câu hỏi gợi ý bên dưới để bắt đầu nhé:
+            <h3 className="text-base sm:text-lg font-bold text-[#0f2942]">Chào em! Cô Dương đây</h3>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mt-1 mb-4 sm:mb-6">
+              Em đang cùng cô tìm hiểu tác phẩm <strong>"{activeWork?.title}"</strong> {activeWork?.author ? `của tác giả ${activeWork.author}` : ''}. Bấm vào câu hỏi gợi ý bên dưới hoặc tự gõ câu hỏi để bắt đầu nhé:
             </p>
 
-            {/* Quick Starters */}
-            <div className="flex flex-wrap gap-2 justify-center max-w-xl">
-              {[
-                'Phân tích vẻ đẹp nhân vật anh thanh niên',
-                'Chiếc máy đo gió của anh thanh niên được bọc bằng gì trong tài liệu?',
-                'Gợi ý dàn ý bài văn nghị luận tác phẩm',
-                'Ý nghĩa nhan đề tác phẩm là gì?',
-              ].map((s, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleSend(s)}
-                  className="text-xs px-3 py-1.5 rounded-full bg-[#f4efe6] hover:bg-amber-100 text-[#0f2942] border border-[#e8e2d5] transition-colors"
-                >
-                  💬 {s}
-                </button>
-              ))}
+            {/* Dynamic Quick Starters for Active Work */}
+            <div className="w-full max-w-xl">
+              <div className="text-[11px] font-semibold text-amber-900 uppercase tracking-wider mb-2 flex items-center justify-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                Gợi ý cho tác phẩm "{activeWork?.title || 'bài học'}"
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
+                {suggestions.map((s, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSend(s)}
+                    className="text-xs p-2.5 sm:p-3 rounded-xl bg-[#fbf9f4] hover:bg-amber-50 text-[#0f2942] border border-[#e8e2d5] transition-all hover:border-amber-300 hover:shadow-xs flex items-start gap-2"
+                  >
+                    <span className="text-amber-700 font-bold shrink-0">✦</span>
+                    <span className="line-clamp-2 leading-relaxed">{s}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
@@ -254,7 +299,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               </div>
 
               <div
-                className={`max-w-[85%] sm:max-w-[78%] rounded-2xl p-4 text-sm leading-relaxed ${
+                className={`max-w-[92%] sm:max-w-[80%] rounded-2xl p-3 sm:p-4 text-xs sm:text-sm leading-relaxed ${
                   msg.sender === 'user'
                     ? 'bg-[#0f2942] text-white rounded-tr-xs shadow-xs'
                     : msg.isNoSource
@@ -264,7 +309,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               >
                 {/* Message Body with Safe Sanitized Markdown */}
                 <div
-                  className="prose-cu-duong text-sm"
+                  className="prose-cu-duong text-xs sm:text-sm"
                   dangerouslySetInnerHTML={{
                     __html: DOMPurify.sanitize(marked.parse(msg.text) as string),
                   }}
@@ -272,13 +317,13 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
                 {/* Grounding Citations Panel */}
                 {msg.citations && msg.citations.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-200/60">
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/60">
                     <button
                       onClick={() => setOpenCitationIdx(openCitationIdx === idx ? null : idx)}
                       className="flex items-center gap-1.5 text-xs font-semibold text-[#0f2942] hover:text-amber-800 transition-colors"
                     >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      Căn cứ tài liệu giáo viên ({msg.citations.length})
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Căn cứ tài liệu giáo viên ({msg.citations.length})</span>
                       {openCitationIdx === idx ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
 
@@ -287,14 +332,14 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                         {msg.citations.map((c, cIdx) => (
                           <div
                             key={cIdx}
-                            className="bg-white/80 p-2.5 rounded-xl border border-emerald-100 text-xs text-slate-700"
+                            className="bg-white/90 p-2 sm:p-2.5 rounded-xl border border-emerald-100 text-[11px] sm:text-xs text-slate-700"
                           >
-                            <div className="font-semibold text-emerald-900 flex items-center gap-1">
-                              <FileText className="w-3 h-3 text-emerald-700" />
-                              {c.fileName}
+                            <div className="font-semibold text-emerald-900 flex items-center gap-1 truncate">
+                              <FileText className="w-3 h-3 text-emerald-700 shrink-0" />
+                              <span className="truncate">{c.fileName}</span>
                             </div>
                             {c.sourceText && (
-                              <p className="mt-1 text-[11px] text-slate-600 italic bg-slate-50 p-1.5 rounded-lg border-l-2 border-emerald-500">
+                              <p className="mt-1 text-[10px] sm:text-[11px] text-slate-600 italic bg-slate-50 p-1.5 rounded-lg border-l-2 border-emerald-500 break-words">
                                 "{c.sourceText}"
                               </p>
                             )}
@@ -307,9 +352,9 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
                 {/* AI Model Badge */}
                 {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex items-center justify-between text-[11px]">
-                    <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <div className="mt-2 pt-2 border-t border-slate-200/50 flex items-center justify-between text-[10px] sm:text-[11px]">
+                    <span className="flex items-center gap-1 text-emerald-700 font-medium">
+                      <Sparkles className="w-3 h-3 text-amber-500" />
                       {msg.modelUsed ? `Google Gemini AI (${msg.modelUsed})` : 'Google Gemini AI'}
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
@@ -324,10 +369,10 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
         {isLoading && (
           <div className="flex items-start gap-2">
-            <div className="w-7 h-7 rounded-xl bg-amber-100 flex items-center justify-center text-amber-900">
-              <Loader2 className="w-4 h-4 animate-spin text-amber-800" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-amber-100 flex items-center justify-center text-amber-900 shrink-0">
+              <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin text-amber-800" />
             </div>
-            <div className="bg-[#fbf9f4] p-3 rounded-2xl rounded-tl-xs border border-[#e8e2d5] text-xs text-slate-600 flex items-center gap-2">
+            <div className="bg-[#fbf9f4] p-2.5 sm:p-3 rounded-2xl rounded-tl-xs border border-[#e8e2d5] text-xs text-slate-600 flex items-center gap-2">
               <span>Cô đang tra cứu tài liệu bài học và suy ngẫm câu trả lời...</span>
             </div>
           </div>
@@ -336,15 +381,38 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Bottom Action & Input Area */}
-      <div className="mt-3 bg-white rounded-2xl p-2.5 sm:p-3 shadow-xs border border-[#e8e2d5]">
-        <div className="flex items-center justify-between px-2 mb-2 text-[11px] text-slate-400">
-          <div className="flex items-center gap-3">
-            <span className="font-medium text-slate-600">
-              Chế độ hiện tại: <strong className="text-[#0f2942]">{learningModeConfigs.find(m => m.id === learningMode)?.label}</strong>
+      {/* Dynamic Suggestions Carousel when Chat has messages (Fast Thumb Tap on Mobile) */}
+      {messages.length > 0 && (
+        <div className="shrink-0 mt-1.5 mb-1 px-1">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 snap-x">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0 flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-amber-500" />
+              Gợi ý:
             </span>
+            {suggestions.map((s, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSend(s)}
+                className="text-[11px] px-2.5 py-1 rounded-full bg-white hover:bg-amber-50 text-[#0f2942] border border-[#e8e2d5] hover:border-amber-300 shrink-0 whitespace-nowrap snap-start shadow-2xs transition-colors"
+              >
+                💬 {s}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-3">
+        </div>
+      )}
+
+      {/* Bottom Action & Input Area */}
+      <div className="mt-1.5 shrink-0 bg-white rounded-xl sm:rounded-2xl p-2 sm:p-3 shadow-xs border border-[#e8e2d5]">
+        {/* Helper Line: Current Mode & Clear History */}
+        <div className="flex items-center justify-between px-1 mb-1.5 text-[10px] sm:text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5 truncate">
+            <span>Chế độ:</span>
+            <strong className="text-[#0f2942] truncate font-semibold">
+              {learningModeConfigs.find(m => m.id === learningMode)?.label}
+            </strong>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <label className="flex items-center gap-1 cursor-pointer hover:text-slate-700">
               <input
                 type="checkbox"
@@ -352,27 +420,30 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                 onChange={(e) => setSaveLocalHistory(e.target.checked)}
                 className="rounded text-[#0f2942] w-3 h-3"
               />
-              <span>Lưu trên máy này</span>
+              <span className="hidden sm:inline">Lưu trên máy này</span>
+              <span className="sm:hidden">Lưu máy</span>
             </label>
             <button
               onClick={handleClearHistory}
               title="Xóa lịch sử trên thiết bị này"
-              className="hover:text-red-600 flex items-center gap-1 transition-colors"
+              className="hover:text-red-600 flex items-center gap-1 transition-colors text-slate-400 hover:text-red-600"
             >
               <Trash2 className="w-3 h-3" />
-              Xóa lịch sử
+              <span className="hidden sm:inline">Xóa lịch sử</span>
             </button>
           </div>
         </div>
 
+        {/* Input Form with Responsive Touch Area */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
             handleSend();
           }}
-          className="flex items-end gap-2"
+          className="flex items-end gap-1.5 sm:gap-2"
         >
           <textarea
+            ref={textareaRef}
             rows={2}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
@@ -386,19 +457,20 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               learningMode === 'qa'
                 ? `Hỏi cô về nhân vật, chi tiết, nhan đề trong "${activeWork?.title}"...`
                 : learningMode === 'character_analysis'
-                ? `Nhập nhân vật và khía cạnh em muốn phân tích 4 bước...`
+                ? `Nhập nhân vật em muốn phân tích 4 bước...`
                 : learningMode === 'outline'
                 ? `Nhập đề bài em muốn cô gợi ý dàn ý...`
-                : `Nhập nội dung tương tác với cô...`
+                : `Hỏi cô về bài học "${activeWork?.title}"...`
             }
-            className="flex-1 bg-[#fbf9f4] rounded-xl px-3 py-2 text-sm text-[#1c2530] border border-[#e8e2d5] focus:outline-none focus:ring-2 focus:ring-[#0f2942]/20 resize-none"
+            className="flex-1 bg-[#fbf9f4] rounded-xl px-3 py-2 text-base sm:text-sm text-[#1c2530] border border-[#e8e2d5] focus:outline-none focus:ring-2 focus:ring-[#0f2942]/20 resize-none min-h-[44px] max-h-24 sm:max-h-32"
             maxLength={1000}
           />
 
           <button
             type="submit"
             disabled={isLoading || !question.trim()}
-            className="px-4 py-3 rounded-xl bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 disabled:cursor-not-allowed transition-all font-semibold flex items-center justify-center shrink-0 shadow-xs"
+            aria-label="Gửi câu hỏi"
+            className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 disabled:cursor-not-allowed transition-all font-semibold flex items-center justify-center shrink-0 shadow-xs active:scale-95"
           >
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>

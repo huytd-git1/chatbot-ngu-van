@@ -46,24 +46,42 @@ export const Navbar: React.FC<NavbarProps> = ({
             <>
               {/* Quota Indicator for Student / Test Teacher */}
               {quota && (
-                <div className="hidden md:flex items-center px-3 py-1 rounded-full text-xs font-medium border bg-amber-50/80 border-amber-200 text-amber-900 shadow-2xs">
-                  {quota.isUnlimited ? (
-                    <span className="flex items-center gap-1 text-emerald-800 font-semibold">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                      Lượt hỏi: Không giới hạn (Giáo viên Test)
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                      Lượt hôm nay: <strong className="font-bold text-[#0f2942]">{quota.remaining}</strong>/{quota.limit} còn lại
-                      {quota.extraGranted > 0 && (
-                        <span className="text-[10px] ml-1 px-1.5 py-0.2 rounded bg-amber-200 text-amber-900">
-                          +{quota.extraGranted} cấp thêm
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </div>
+                <>
+                  {/* Desktop Quota Indicator */}
+                  <div className="hidden md:flex items-center px-3 py-1 rounded-full text-xs font-medium border bg-amber-50/80 border-amber-200 text-amber-900 shadow-2xs">
+                    {quota.isUnlimited ? (
+                      <span className="flex items-center gap-1 text-emerald-800 font-semibold">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        Lượt hỏi: Không giới hạn (Giáo viên Test)
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                        Lượt hôm nay: <strong className="font-bold text-[#0f2942]">{quota.remaining}</strong>/{quota.limit} còn lại
+                        {quota.extraGranted > 0 && (
+                          <span className="text-[10px] ml-1 px-1.5 py-0.2 rounded bg-amber-200 text-amber-900">
+                            +{quota.extraGranted} cấp thêm
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Mobile Compact Quota Badge */}
+                  <div className="md:hidden flex items-center px-2 py-1 rounded-lg text-[11px] font-bold bg-amber-50 border border-amber-200/80 text-amber-900 shrink-0">
+                    {quota.isUnlimited ? (
+                      <span className="flex items-center gap-1 text-emerald-700">
+                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                        <span>Vô hạn</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        <span>{quota.remaining}/{quota.limit} lượt</span>
+                      </span>
+                    )}
+                  </div>
+                </>
               )}
 
               {/* View Switcher based on role */}
