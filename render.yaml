@@ -7,11 +7,13 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: npm install --prefix backend && npm install --prefix frontend && npm run build
+    buildCommand: npm install --include=dev --prefix backend && npm install --include=dev --prefix frontend && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
       - key: PORT
         value: 10000
       - key: SESSION_SECRET
