@@ -3,7 +3,7 @@
 # ==============================================================================
 services:
   - type: web
-    name: co-duong-day-van
+    name: co-duong-ngu-van
     runtime: node
     plan: free
     region: singapore
