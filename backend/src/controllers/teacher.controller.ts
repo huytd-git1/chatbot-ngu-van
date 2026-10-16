@@ -628,65 +628,70 @@ export class TeacherController {
    * Delete a student from assigned class
    */
   static async deleteStudent(req: Request, res: Response): Promise<void> {
-    if (!req.user) {
-      res.status(401).json({ error: 'Chưa đăng nhập.' });
-      return;
-    }
-
-    const { studentId } = req.params;
-    const teacherId = req.user.id;
-    const isAdmin = req.user.role === 'admin';
-
-    const studentRes = await query<{
-      id: string;
-      user_id: string;
-      class_id: string;
-      student_code: string;
-      full_name: string;
-      class_name: string;
-    }>(
-      `SELECT s.id, s.user_id, s.class_id, s.student_code, u.full_name, c.name as class_name
-       FROM students s
-       JOIN users u ON s.user_id = u.id
-       JOIN classes c ON s.class_id = c.id
-       WHERE s.id = $1`,
-      [studentId]
-    );
-
-    if (studentRes.rows.length === 0) {
-      res.status(404).json({ error: 'Không tìm thấy học sinh cần xóa.' });
-      return;
-    }
-
-    const st = studentRes.rows[0];
-
-    // Verify teacher assignment if not admin
-    if (!isAdmin) {
-      const hasAccess = await TeacherController.verifyClassAccess(teacherId, st.class_id, req.user.role);
-      if (!hasAccess) {
-        res.status(403).json({ error: 'Bạn không có quyền quản lý học sinh của lớp này.' });
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Chưa đăng nhập.' });
         return;
       }
+
+      const { studentId } = req.params;
+      const teacherId = req.user.id;
+      const isAdmin = req.user.role === 'admin';
+
+      const studentRes = await query<{
+        id: string;
+        user_id: string;
+        class_id: string;
+        student_code: string;
+        full_name: string;
+        class_name: string;
+      }>(
+        `SELECT s.id, s.user_id, s.class_id, s.student_code, u.full_name, c.name as class_name
+         FROM students s
+         JOIN users u ON s.user_id = u.id
+         JOIN classes c ON s.class_id = c.id
+         WHERE s.id = $1`,
+        [studentId]
+      );
+
+      if (studentRes.rows.length === 0) {
+        res.status(404).json({ error: 'Không tìm thấy học sinh cần xóa.' });
+        return;
+      }
+
+      const st = studentRes.rows[0];
+
+      // Verify teacher assignment if not admin
+      if (!isAdmin) {
+        const hasAccess = await TeacherController.verifyClassAccess(teacherId, st.class_id, req.user.role);
+        if (!hasAccess) {
+          res.status(403).json({ error: 'Bạn không có quyền quản lý học sinh của lớp này.' });
+          return;
+        }
+      }
+
+      // Delete student and underlying user record
+      await query(`DELETE FROM students WHERE id = $1`, [studentId]);
+      await query(`DELETE FROM users WHERE id = $1`, [st.user_id]);
+
+      // Audit log
+      await query(
+        `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
+         VALUES ($1, 'DELETE_STUDENT', 'student', $2, $3, $4)`,
+        [
+          req.user.id,
+          studentId,
+          JSON.stringify({ studentCode: st.student_code, fullName: st.full_name, className: st.class_name }),
+          req.ip,
+        ]
+      );
+
+      res.status(200).json({
+        message: `Đã xóa học sinh ${st.full_name} (${st.student_code}) khỏi lớp ${st.class_name} thành công.`,
+      });
+    } catch (err: any) {
+      console.error('Error in TeacherController.deleteStudent:', err);
+      res.status(500).json({ error: 'Không thể xóa học sinh.' });
     }
-
-    // Delete student and underlying user record
-    await query(`DELETE FROM students WHERE id = $1`, [studentId]);
-    await query(`DELETE FROM users WHERE id = $1`, [st.user_id]);
-
-    // Audit log
-    await query(
-      `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
-       VALUES ($1, 'DELETE_STUDENT', 'student', $2, $3, $4)`,
-      [
-        req.user.id,
-        studentId,
-        JSON.stringify({ studentCode: st.student_code, fullName: st.full_name, className: st.class_name }),
-        req.ip,
-      ]
-    );
-
-    res.status(200).json({
-      message: `Đã xóa học sinh ${st.full_name} (${st.student_code}) khỏi lớp ${st.class_name} thành công.`,
-    });
   }
 }
