@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Power, Settings, History, Sparkles,
-  CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu
+  CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu,
+  Layers, RefreshCw, Zap, ShieldCheck
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
 
@@ -25,6 +26,14 @@ export const AdminDashboard: React.FC = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [maskedApiKey, setMaskedApiKey] = useState('');
   const [hasSavedKey, setHasSavedKey] = useState(false);
+  const [keyCount, setKeyCount] = useState(0);
+  const [activeKeyCount, setActiveKeyCount] = useState(0);
+  const [keyPool, setKeyPool] = useState<Array<{
+    index: number;
+    maskedKey: string;
+    isCooldown: boolean;
+    cooldownSecondsLeft: number;
+  }>>([]);
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const [supportedModels, setSupportedModels] = useState<any[]>([]);
   const [isLiveAiConfigured, setIsLiveAiConfigured] = useState(false);
@@ -35,6 +44,17 @@ export const AdminDashboard: React.FC = () => {
     success?: boolean;
     message?: string;
     responseTimeMs?: number;
+    totalKeys?: number;
+    workingKeys?: number;
+    results?: Array<{
+      index: number;
+      maskedKey: string;
+      success: boolean;
+      modelUsed: string;
+      responseTimeMs?: number;
+      message: string;
+      status: 'ready' | 'quota_exceeded' | 'unavailable' | 'error';
+    }>;
   } | null>(null);
 
   // Audit logs
@@ -71,6 +91,9 @@ export const AdminDashboard: React.FC = () => {
       setIsLiveAiConfigured(!!data.isLiveConfigured);
       setMaskedApiKey(data.maskedApiKey || '');
       setHasSavedKey(!!data.hasApiKey);
+      setKeyCount(data.keyCount || 0);
+      setActiveKeyCount(data.activeKeyCount || 0);
+      setKeyPool(data.keyPool || []);
       if (data.activeModel) setSelectedModel(data.activeModel);
       if (data.supportedModels) setSupportedModels(data.supportedModels);
     } catch {}
@@ -174,9 +197,12 @@ export const AdminDashboard: React.FC = () => {
       });
       setTestResult({
         loading: false,
-        success: true,
+        success: res.success,
         message: res.message,
         responseTimeMs: res.responseTimeMs,
+        totalKeys: res.totalKeys,
+        workingKeys: res.workingKeys,
+        results: res.results,
       });
     } catch (err: any) {
       setTestResult({
@@ -391,55 +417,109 @@ export const AdminDashboard: React.FC = () => {
           )}
 
           <form onSubmit={handleSaveAiSettings} className="space-y-5">
-            {/* Prominent Active Saved Key Card */}
+            {/* Prominent Active Saved Key Pool Card */}
             {hasSavedKey && (
-              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between shadow-2xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
-                    <CheckCircle2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
-                      Đã lưu & Kích hoạt Gemini API Key thành công!
+              <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
                     </div>
-                    <div className="text-[11px] text-emerald-700 font-mono mt-0.5">
-                      Khóa đang chạy thực tế: <span className="bg-white/80 px-2 py-0.5 rounded font-bold border border-emerald-200">{maskedApiKey}</span>
+                    <div>
+                      <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
+                        Nhóm Gemini API Key đang hoạt động ({keyCount} Keys)
+                      </div>
+                      <div className="text-[11px] text-emerald-700 mt-0.5">
+                        {activeKeyCount}/{keyCount} key đang sẵn sàng phân bổ tải & dự phòng tự động
+                      </div>
                     </div>
                   </div>
+                  <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-full text-[10px] font-bold tracking-wide uppercase flex items-center gap-1 shadow-2xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    Pool Active
+                  </span>
                 </div>
-                <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-full text-[10px] font-bold tracking-wide uppercase">
-                  Live Active
-                </span>
+
+                {/* Key Pool List Badges */}
+                {keyPool.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-emerald-200/60">
+                    {keyPool.map((k) => (
+                      <div
+                        key={k.index}
+                        className="flex items-center justify-between p-2 rounded-xl bg-white/90 border border-emerald-200/80 text-xs shadow-2xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold flex items-center justify-center shrink-0">
+                            #{k.index}
+                          </span>
+                          <span className="font-mono text-emerald-950 font-semibold truncate text-[11px]">
+                            {k.maskedKey}
+                          </span>
+                        </div>
+                        {k.isCooldown ? (
+                          <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shrink-0">
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Làm mát ({k.cooldownSecondsLeft}s)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold shrink-0">
+                            Sẵn sàng
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* API Key input */}
+            {/* Smart Failover Explanation Banner */}
+            <div className="p-3.5 bg-sky-50 border border-sky-200/80 rounded-xl flex items-start gap-3">
+              <Zap className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+              <div className="text-[11px] text-sky-900 leading-relaxed">
+                <span className="font-bold">Cơ chế Tự động Dự phòng & Cân bằng tải (Failover Pool):</span> Hệ thống tự động phân bổ lượt hỏi đáp xoay vòng (Round-Robin) giữa các API Key. Khi một Key bất kỳ bị cạn Quota (lỗi 429) hoặc máy chủ Google bị quá tải/trễ mạng (lỗi 503), hệ thống tự động tạm dừng key đó trong 60 giây và ngay lập tức chuyển sang Key dự phòng kế tiếp để học sinh không bao giờ bị gián đoạn.
+              </div>
+            </div>
+
+            {/* API Key input area */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700">
-                  {hasSavedKey ? 'Nhập khóa API mới nếu muốn thay đổi:' : 'Nhập Google Gemini API Key:'}
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-slate-500" />
+                  {hasSavedKey
+                    ? 'Thêm / Thay thế danh sách Google Gemini API Keys:'
+                    : 'Nhập danh sách Google Gemini API Keys:'}
                 </label>
+                <div className="flex items-center gap-2">
+                  {apiKeyInput.trim() && (
+                    <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                      Nhận diện: {apiKeyInput.split(/[\n,;\r]+/).filter((k) => k.trim().length > 0).length} keys
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="text-[11px] text-slate-500 hover:text-slate-700 flex items-center gap-1"
+                  >
+                    {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    {showApiKey ? 'Ẩn ký tự' : 'Hiện ký tự'}
+                  </button>
+                </div>
               </div>
 
               <div className="relative">
-                <input
-                  type={showApiKey ? 'text' : 'password'}
-                  placeholder={hasSavedKey ? `Đang dùng khóa (${maskedApiKey}) - Để trống nếu giữ nguyên` : 'AIzaSy... (Lấy tại aistudio.google.com)'}
+                <textarea
+                  rows={3}
+                  placeholder={`Dán một hoặc nhiều API Key tại đây (Mỗi key một dòng hoặc cách nhau bởi dấu phẩy):\nAIzaSyA...\nAIzaSyB...\nAIzaSyC...`}
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
-                  className="w-full text-xs p-2.5 pr-10 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none"
+                  className={`w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none resize-y ${
+                    !showApiKey && apiKeyInput ? 'filter blur-[1.5px] hover:blur-none transition-all' : ''
+                  }`}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
               </div>
 
               <p className="text-[11px] text-slate-500">
-                Lấy API Key hoàn toàn miễn phí tại{' '}
+                Gợi ý: Quý thầy cô có thể tạo nhiều API Key miễn phí từ các tài khoản Google khác nhau tại{' '}
                 <a
                   href="https://aistudio.google.com/app/apikey"
                   target="_blank"
@@ -447,7 +527,8 @@ export const AdminDashboard: React.FC = () => {
                   className="text-amber-700 underline font-semibold"
                 >
                   Google AI Studio
-                </a>.
+                </a>{' '}
+                và dán tất cả vào đây để tăng hạn mức hỏi đáp lên gấp nhiều lần.
               </p>
             </div>
 
@@ -483,11 +564,13 @@ export const AdminDashboard: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-[#0f2942]">{m.name}</span>
                             {m.badge && (
-                              <span className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
-                                m.badge === 'Khuyên dùng'
-                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                  : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                              }`}>
+                              <span
+                                className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
+                                  m.badge === 'Khuyên dùng'
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                }`}
+                              >
                                 {m.badge}
                               </span>
                             )}
@@ -515,29 +598,89 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Test Connection Results Card */}
+            {/* Test Connection Results Card with Per-Key Diagnostics */}
             {testResult && (
-              <div className={`p-3.5 rounded-xl text-xs border ${
-                testResult.success
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-red-50 border-red-200 text-red-800'
-              }`}>
-                <div className="flex items-center justify-between font-bold mb-1">
-                  <span className="flex items-center gap-1.5">
+              <div
+                className={`p-4 rounded-2xl text-xs border space-y-3 shadow-2xs ${
+                  testResult.success
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                    : 'bg-red-50/70 border-red-200 text-red-900'
+                }`}
+              >
+                <div className="flex items-center justify-between font-bold">
+                  <span className="flex items-center gap-2">
                     {testResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                      <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
                     ) : (
-                      <AlertCircle className="w-4 h-4 text-red-600" />
+                      <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
                     )}
-                    {testResult.success ? 'Kiểm tra thành công!' : 'Kiểm tra thất bại!'}
+                    <span>
+                      {testResult.success ? 'Kiểm tra kết nối thành công!' : 'Kiểm tra kết nối thất bại!'}
+                    </span>
                   </span>
                   {testResult.responseTimeMs && (
-                    <span className="font-mono text-[10px] text-slate-500">
-                      Độ trễ: {testResult.responseTimeMs}ms
+                    <span className="font-mono text-[10px] text-slate-600 bg-white/80 px-2 py-0.5 rounded-md border border-slate-200">
+                      Độ trễ TB: {testResult.responseTimeMs}ms
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] leading-relaxed">{testResult.message}</p>
+
+                <p className="text-[12px] leading-relaxed">{testResult.message}</p>
+
+                {/* Per-Key Test Diagnostic Breakdown */}
+                {testResult.results && testResult.results.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-emerald-200/60">
+                    <div className="text-[11px] font-bold text-slate-700 mb-1">
+                      Chi tiết trạng thái từng API Key ({testResult.workingKeys}/{testResult.totalKeys} sẵn sàng):
+                    </div>
+                    {testResult.results.map((r) => (
+                      <div
+                        key={r.index}
+                        className={`p-2 rounded-xl flex items-center justify-between text-xs border ${
+                          r.success
+                            ? 'bg-white border-emerald-200 text-slate-800'
+                            : 'bg-red-50 border-red-200 text-red-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${
+                              r.success ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            #{r.index}
+                          </span>
+                          <span className="font-mono font-semibold text-[11px]">{r.maskedKey}</span>
+                          <span className="text-[11px] text-slate-500 truncate hidden sm:inline">
+                            - {r.message}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {r.responseTimeMs && (
+                            <span className="font-mono text-[10px] text-slate-500">
+                              {r.responseTimeMs}ms
+                            </span>
+                          )}
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              r.status === 'ready'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : r.status === 'quota_exceeded'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            {r.status === 'ready'
+                              ? 'Sẵn sàng'
+                              : r.status === 'quota_exceeded'
+                              ? 'Hết Quota (429)'
+                              : 'Lỗi'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -552,12 +695,12 @@ export const AdminDashboard: React.FC = () => {
                 {testResult?.loading ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Đang gửi ping kiểm tra...
+                    Đang ping kiểm tra các API Key...
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    Kiểm tra kết nối
+                    Kiểm tra kết nối toàn bộ Keys
                   </>
                 )}
               </button>

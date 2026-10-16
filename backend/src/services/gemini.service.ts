@@ -27,9 +27,41 @@ export interface SupportedModel {
   badge?: string;
 }
 
+export interface KeyHealthStatus {
+  index: number;
+  maskedKey: string;
+  isCooldown: boolean;
+  cooldownSecondsLeft: number;
+  lastTestedStatus?: 'ready' | 'quota_exceeded' | 'unavailable' | 'error';
+  lastResponseTimeMs?: number;
+}
+
+export interface KeyTestResult {
+  index: number;
+  maskedKey: string;
+  success: boolean;
+  modelUsed: string;
+  responseTimeMs?: number;
+  message: string;
+  error?: string;
+  status: 'ready' | 'quota_exceeded' | 'unavailable' | 'error';
+}
+
+export interface MultiKeyTestResponse {
+  success: boolean;
+  message: string;
+  modelUsed: string;
+  totalKeys: number;
+  workingKeys: number;
+  responseTimeMs?: number;
+  results: KeyTestResult[];
+}
+
 export class GeminiService {
-  private static genAiClient: GoogleGenAI | null = null;
-  private static activeApiKey: string = env.GEMINI_API_KEY || '';
+  private static activeApiKeys: string[] = [];
+  private static roundRobinIndex: number = 0;
+  private static keyCooldowns: Map<string, number> = new Map(); // key -> cooldown until epoch ms
+  private static clientsCache: Map<string, GoogleGenAI> = new Map();
   private static activeModel: string = env.GEMINI_MODEL || 'gemini-3.8-flash';
   private static activeEmbeddingModel: string = env.GEMINI_EMBEDDING_MODEL || 'models/gemini-embedding-2';
 
@@ -44,6 +76,7 @@ export class GeminiService {
       id: 'gemini-3.8-flash',
       name: 'Gemini 3.8 Flash',
       description: 'Mô hình mới của Google, tư duy phân tích văn học chuyên sâu',
+      badge: 'Chuyên sâu',
     },
     {
       id: 'gemini-2.5-flash',
@@ -57,8 +90,37 @@ export class GeminiService {
     },
   ];
 
+  /**
+   * Parse single string with multiple keys separated by newlines, commas, or semicolons
+   */
+  public static parseKeys(input?: string | null): string[] {
+    if (!input) return [];
+    return input
+      .split(/[\n,;\r]+/)
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0 && !k.startsWith('#'));
+  }
+
+  /**
+   * Masks an API Key safely for frontend display
+   */
+  public static maskKey(key: string): string {
+    if (!key) return '';
+    if (key.length <= 8) return '***';
+    return `${key.substring(0, 6)}...${key.slice(-4)}`;
+  }
+
+  /**
+   * Initializes Gemini settings from database or fallback to env
+   */
   public static async initFromDb(): Promise<void> {
     try {
+      // Load fallback from env first
+      const envKeys = this.parseKeys(env.GEMINI_API_KEY);
+      if (envKeys.length > 0) {
+        this.activeApiKeys = envKeys;
+      }
+
       const { rows } = await query<{
         api_key: string | null;
         model_name: string | null;
@@ -67,7 +129,10 @@ export class GeminiService {
 
       if (rows.length > 0) {
         if (rows[0].api_key && rows[0].api_key.trim() !== '') {
-          this.activeApiKey = rows[0].api_key.trim();
+          const dbKeys = this.parseKeys(rows[0].api_key);
+          if (dbKeys.length > 0) {
+            this.activeApiKeys = dbKeys;
+          }
         }
         if (rows[0].model_name && rows[0].model_name.trim() !== '') {
           this.activeModel = rows[0].model_name.trim();
@@ -76,32 +141,65 @@ export class GeminiService {
           this.activeEmbeddingModel = rows[0].embedding_model.trim();
         }
       }
-      this.genAiClient = null; // Re-initialize on next demand
-      console.log(`[GeminiService] AI Config loaded: Model=${this.activeModel}, LiveAPI=${this.isLiveApiConfigured()}`);
+      this.clientsCache.clear();
+      console.log(
+        `[GeminiService] AI Config loaded: Model=${this.activeModel}, KeysPoolSize=${this.activeApiKeys.length}, LiveAPI=${this.isLiveApiConfigured()}`
+      );
     } catch (err) {
       console.warn('[GeminiService] Could not load ai_settings from DB, using env fallback:', err);
     }
   }
 
+  /**
+   * Gets a diagnostic summary of the current AI configuration for Admin UI
+   */
   public static getAiConfigSummary() {
     const isLive = this.isLiveApiConfigured();
-    let maskedKey = '';
-    if (this.activeApiKey && this.activeApiKey.length >= 8) {
-      maskedKey = `${this.activeApiKey.substring(0, 6)}...${this.activeApiKey.slice(-4)}`;
-    } else if (this.activeApiKey) {
-      maskedKey = '***';
+    const now = Date.now();
+
+    // Clean expired cooldowns
+    for (const [k, exp] of this.keyCooldowns.entries()) {
+      if (now >= exp) {
+        this.keyCooldowns.delete(k);
+      }
+    }
+
+    const maskedKeys: KeyHealthStatus[] = this.activeApiKeys.map((key, idx) => {
+      const cooldownExp = this.keyCooldowns.get(key) || 0;
+      const isCooldown = cooldownExp > now;
+      const cooldownSecondsLeft = isCooldown ? Math.ceil((cooldownExp - now) / 1000) : 0;
+      return {
+        index: idx + 1,
+        maskedKey: this.maskKey(key),
+        isCooldown,
+        cooldownSecondsLeft,
+      };
+    });
+
+    const activeKeyCount = maskedKeys.filter((k) => !k.isCooldown).length;
+    let maskedKeySummary = '';
+    if (this.activeApiKeys.length === 1) {
+      maskedKeySummary = this.maskKey(this.activeApiKeys[0]);
+    } else if (this.activeApiKeys.length > 1) {
+      maskedKeySummary = `${this.maskKey(this.activeApiKeys[0])} (+${this.activeApiKeys.length - 1} keys dự phòng)`;
     }
 
     return {
       isLiveConfigured: isLive,
       activeModel: this.activeModel,
       activeEmbeddingModel: this.activeEmbeddingModel,
-      maskedApiKey: maskedKey,
-      hasApiKey: !!this.activeApiKey,
+      maskedApiKey: maskedKeySummary,
+      hasApiKey: this.activeApiKeys.length > 0,
+      keyCount: this.activeApiKeys.length,
+      activeKeyCount,
+      keyPool: maskedKeys,
       supportedModels: this.SUPPORTED_MODELS,
     };
   }
 
+  /**
+   * Updates AI settings and persists keys & model to DB
+   */
   public static async updateAiConfig(params: {
     apiKey?: string;
     modelName?: string;
@@ -110,7 +208,13 @@ export class GeminiService {
     const { apiKey, modelName, embeddingModel } = params;
 
     if (apiKey !== undefined && apiKey.trim() !== '') {
-      this.activeApiKey = apiKey.trim();
+      const parsedKeys = this.parseKeys(apiKey);
+      if (parsedKeys.length > 0) {
+        this.activeApiKeys = parsedKeys;
+        this.roundRobinIndex = 0;
+        this.keyCooldowns.clear();
+        this.clientsCache.clear();
+      }
     }
     if (modelName !== undefined && modelName.trim() !== '') {
       this.activeModel = modelName.trim();
@@ -119,9 +223,11 @@ export class GeminiService {
       this.activeEmbeddingModel = embeddingModel.trim();
     }
 
-    this.genAiClient = null; // Reset client
+    this.clientsCache.clear();
 
     // Persist to DB
+    const keysToStore = apiKey !== undefined ? (apiKey.trim() || null) : (this.activeApiKeys.join('\n') || null);
+
     await query(
       `INSERT INTO ai_settings (id, api_key, model_name, embedding_model, updated_at)
        VALUES ('default', $1, $2, $3, NOW())
@@ -131,70 +237,205 @@ export class GeminiService {
            embedding_model = COALESCE($3, ai_settings.embedding_model),
            updated_at = NOW()`,
       [
-        apiKey !== undefined ? (apiKey.trim() || null) : null,
+        keysToStore,
         modelName !== undefined ? modelName.trim() : null,
         embeddingModel !== undefined ? embeddingModel.trim() : null,
       ]
     );
   }
 
-  public static async testConnection(customApiKey?: string, customModel?: string): Promise<{
-    success: boolean;
-    message: string;
-    modelUsed: string;
-    responseTimeMs?: number;
-    error?: string;
-  }> {
-    const keyToTest = (customApiKey && customApiKey.trim() !== '') ? customApiKey.trim() : this.activeApiKey;
-    const modelToTest = (customModel && customModel.trim() !== '') ? customModel.trim() : this.activeModel;
-
-    if (!keyToTest) {
-      return {
-        success: false,
-        message: 'Chưa có Gemini API Key. Vui lòng nhập API Key để kiểm tra kết nối.',
-        modelUsed: modelToTest,
-        error: 'API Key is missing',
-      };
+  /**
+   * Helper to identify if an error is a candidate for auto-failover (429, 503, 403, network)
+   */
+  public static isFailoverError(err: any): boolean {
+    if (!err) return false;
+    const status = err.status || err.statusCode || err.response?.status;
+    if (status === 429 || status === 503 || status === 403 || status === 500 || status === 502 || status === 504) {
+      return true;
     }
-
-    const startTime = Date.now();
-    try {
-      const testClient = new GoogleGenAI({ apiKey: keyToTest });
-      const response = await testClient.models.generateContent({
-        model: modelToTest,
-        contents: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
-      });
-
-      const responseTimeMs = Date.now() - startTime;
-      const responseText = response.text || 'Kết nối thành công.';
-
-      return {
-        success: true,
-        message: `Kết nối thành công tới mô hình ${modelToTest}! Phản hồi: "${responseText.trim()}"`,
-        modelUsed: modelToTest,
-        responseTimeMs,
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: `Kiểm tra kết nối thất bại: ${err.message || 'Lỗi không xác định khi gọi Gemini API'}`,
-        modelUsed: modelToTest,
-        error: err.message,
-      };
-    }
+    const msg = (err.message || '').toLowerCase();
+    return (
+      msg.includes('429') ||
+      msg.includes('503') ||
+      msg.includes('resource_exhausted') ||
+      msg.includes('quota') ||
+      msg.includes('rate limit') ||
+      msg.includes('overloaded') ||
+      msg.includes('unavailable') ||
+      msg.includes('high demand') ||
+      msg.includes('econnreset') ||
+      msg.includes('etimedout') ||
+      msg.includes('fetch failed') ||
+      msg.includes('deadline exceeded')
+    );
   }
 
+  /**
+   * Mark a key as cooling down for a given duration (default: 60s)
+   */
+  public static markKeyCooldown(key: string, durationMs: number = 60000): void {
+    this.keyCooldowns.set(key, Date.now() + durationMs);
+    console.warn(`[GeminiService] API Key (${this.maskKey(key)}) put into cooldown for ${Math.round(durationMs / 1000)}s.`);
+  }
+
+  /**
+   * Gets ordered candidate keys with round-robin rotation, prioritizing non-cooling keys
+   */
+  public static getCandidateApiKeys(): string[] {
+    const total = this.activeApiKeys.length;
+    if (total === 0) return [];
+
+    const now = Date.now();
+    for (const [k, exp] of this.keyCooldowns.entries()) {
+      if (now >= exp) {
+        this.keyCooldowns.delete(k);
+      }
+    }
+
+    // Build ordered list starting from current roundRobinIndex
+    const ordered: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const idx = (this.roundRobinIndex + i) % total;
+      ordered.push(this.activeApiKeys[idx]);
+    }
+
+    // Advance round-robin for subsequent requests
+    this.roundRobinIndex = (this.roundRobinIndex + 1) % total;
+
+    const readyKeys = ordered.filter((k) => !this.keyCooldowns.has(k));
+    const coolingKeys = ordered.filter((k) => this.keyCooldowns.has(k));
+
+    // Try ready keys first; if all are cooling, still attempt cooling keys as last resort before mock fallback
+    return [...readyKeys, ...coolingKeys];
+  }
+
+  /**
+   * Get cached or create a GoogleGenAI client for a specific API Key
+   */
+  public static getClientForKey(apiKey: string): GoogleGenAI {
+    let client = this.clientsCache.get(apiKey);
+    if (!client) {
+      client = new GoogleGenAI({ apiKey });
+      this.clientsCache.set(apiKey, client);
+    }
+    return client;
+  }
+
+  /**
+   * Get a default client from pool
+   */
   private static getClient(): GoogleGenAI | null {
-    if (this.genAiClient) return this.genAiClient;
-    if (this.activeApiKey && this.activeApiKey.trim() !== '') {
-      this.genAiClient = new GoogleGenAI({ apiKey: this.activeApiKey });
-      return this.genAiClient;
+    const candidates = this.getCandidateApiKeys();
+    if (candidates.length > 0) {
+      return this.getClientForKey(candidates[0]);
     }
     return null;
   }
 
   public static isLiveApiConfigured(): boolean {
-    return !!(this.activeApiKey && this.activeApiKey.trim() !== '');
+    return this.activeApiKeys.length > 0;
+  }
+
+  /**
+   * Comprehensive connection test across single or multiple API keys
+   */
+  public static async testConnection(
+    customApiKey?: string,
+    customModel?: string
+  ): Promise<MultiKeyTestResponse> {
+    const keysToTest =
+      customApiKey && customApiKey.trim() !== ''
+        ? this.parseKeys(customApiKey)
+        : this.activeApiKeys;
+
+    const modelToTest =
+      customModel && customModel.trim() !== '' ? customModel.trim() : this.activeModel;
+
+    if (keysToTest.length === 0) {
+      return {
+        success: false,
+        message: 'Chưa có Gemini API Key. Vui lòng nhập ít nhất một API Key để kiểm tra kết nối.',
+        modelUsed: modelToTest,
+        totalKeys: 0,
+        workingKeys: 0,
+        results: [],
+      };
+    }
+
+    const results: KeyTestResult[] = [];
+    let workingKeys = 0;
+    let overallStartTime = Date.now();
+
+    for (let idx = 0; idx < keysToTest.length; idx++) {
+      const key = keysToTest[idx];
+      const masked = this.maskKey(key);
+      const keyStartTime = Date.now();
+
+      try {
+        const testClient = new GoogleGenAI({ apiKey: key });
+        const response = await testClient.models.generateContent({
+          model: modelToTest,
+          contents: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
+        });
+
+        const responseTimeMs = Date.now() - keyStartTime;
+        const responseText = response.text || 'Kết nối thành công.';
+        workingKeys++;
+
+        results.push({
+          index: idx + 1,
+          maskedKey: masked,
+          success: true,
+          modelUsed: modelToTest,
+          responseTimeMs,
+          message: `Sẵn sàng (${responseTimeMs}ms): "${responseText.trim().substring(0, 80)}"`,
+          status: 'ready',
+        });
+      } catch (err: any) {
+        const responseTimeMs = Date.now() - keyStartTime;
+        let status: 'quota_exceeded' | 'unavailable' | 'error' = 'error';
+        const msg = (err.message || '').toLowerCase();
+
+        if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+          status = 'quota_exceeded';
+        } else if (msg.includes('503') || msg.includes('unavailable') || msg.includes('overloaded')) {
+          status = 'unavailable';
+        }
+
+        results.push({
+          index: idx + 1,
+          maskedKey: masked,
+          success: false,
+          modelUsed: modelToTest,
+          responseTimeMs,
+          message: `Lỗi: ${err.message || 'Không thể kết nối'}`,
+          error: err.message,
+          status,
+        });
+      }
+    }
+
+    const overallResponseTimeMs = Date.now() - overallStartTime;
+    const isOverallSuccess = workingKeys > 0;
+
+    let summaryMessage = '';
+    if (workingKeys === keysToTest.length) {
+      summaryMessage = `Tất cả ${workingKeys}/${keysToTest.length} API Key đều hoạt động xuất sắc với mô hình ${modelToTest}!`;
+    } else if (workingKeys > 0) {
+      summaryMessage = `Đã xác thực thành công ${workingKeys}/${keysToTest.length} API Key. Các key hoạt động sẽ tự động thay thế khi có key hết Quota.`;
+    } else {
+      summaryMessage = `Toàn bộ ${keysToTest.length} API Key đều không thể kết nối. Vui lòng kiểm tra lại Quota hoặc quyền truy cập.`;
+    }
+
+    return {
+      success: isOverallSuccess,
+      message: summaryMessage,
+      modelUsed: modelToTest,
+      totalKeys: keysToTest.length,
+      workingKeys,
+      responseTimeMs: Math.round(overallResponseTimeMs / keysToTest.length),
+      results,
+    };
   }
 
   /**
@@ -392,11 +633,11 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
       chatHistory = [],
     } = params;
 
-    const client = this.getClient();
+    const candidateKeys = this.getCandidateApiKeys();
     const systemInstruction = this.buildSystemInstruction(learningMode, workTitle, prepReviewSettings);
 
-    // 1. If no live API client, run high-fidelity simulated File Search RAG
-    if (!client) {
+    // 1. If no live API keys configured, run high-fidelity simulated File Search RAG
+    if (candidateKeys.length === 0) {
       const mockRes = this.runMockFileSearch({
         workTitle,
         studentQuestion,
@@ -412,51 +653,60 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
       };
     }
 
-    // 2. Live API with Gemini - Dual-strategy:
-    // Strategy A: File Search tool if real cloud store exists
-    // Strategy B: Direct Context Grounding via models.generateContent (ultra-reliable, grounds on document text directly)
-    try {
-      let fullResponseText = '';
-      const citations: FileCitationMeta[] = [];
-      let toolActuallyUsed = false;
-      let tokenCount = 0;
-      let apiSucceeded = false;
-      let actualModelUsed = this.activeModel;
+    // 2. Iterate through candidate API keys with auto-failover on 429 (Quota) / 503 (Overloaded)
+    let lastApiError: any = null;
 
-      // Check if store name is a real Google Cloud store (mock stores start with fileSearchStores/work_ or contain mock)
-      const hasRealCloudStore = fileSearchStoreNames.length > 0 && !fileSearchStoreNames.some(s => s.includes('mock') || s.startsWith('fileSearchStores/work_'));
+    for (let keyIdx = 0; keyIdx < candidateKeys.length; keyIdx++) {
+      const currentKey = candidateKeys[keyIdx];
+      const client = this.getClientForKey(currentKey);
 
-      if (hasRealCloudStore) {
-        try {
-          const tools = [{
-            type: 'file_search',
-            file_search_store_names: fileSearchStoreNames,
-          }];
+      try {
+        let fullResponseText = '';
+        const citations: FileCitationMeta[] = [];
+        let toolActuallyUsed = false;
+        let tokenCount = 0;
+        let apiSucceeded = false;
+        let actualModelUsed = this.activeModel;
 
-          const interaction = await client.interactions.create({
-            model: this.activeModel,
-            input: studentQuestion,
-            tools: tools as any,
-            systemInstruction,
-          } as any);
+        // Check if store name is a real Google Cloud store
+        const hasRealCloudStore =
+          fileSearchStoreNames.length > 0 &&
+          !fileSearchStoreNames.some((s) => s.includes('mock') || s.startsWith('fileSearchStores/work_'));
 
-          if (interaction.steps) {
-            for (const step of interaction.steps) {
-              if (step.type === 'file_search_call' || step.type === 'file_search_result') {
-                toolActuallyUsed = true;
-              }
-              if (step.type === 'model_output' && (step as any).content) {
-                for (const contentBlock of (step as any).content) {
-                  if (contentBlock.type === 'text') {
-                    fullResponseText += contentBlock.text || '';
-                    if (contentBlock.annotations) {
-                      for (const ann of contentBlock.annotations) {
-                        if (ann.type === 'file_citation') {
-                          toolActuallyUsed = true;
-                          citations.push({
-                            fileName: ann.file_name || ann.source_file || authorizedDocumentTitles[0] || 'Tài liệu học tập',
-                            sourceText: ann.source || ann.text || undefined,
-                          });
+        if (hasRealCloudStore) {
+          try {
+            const tools = [
+              {
+                type: 'file_search',
+                file_search_store_names: fileSearchStoreNames,
+              },
+            ];
+
+            const interaction = await client.interactions.create({
+              model: this.activeModel,
+              input: studentQuestion,
+              tools: tools as any,
+              systemInstruction,
+            } as any);
+
+            if (interaction.steps) {
+              for (const step of interaction.steps) {
+                if (step.type === 'file_search_call' || step.type === 'file_search_result') {
+                  toolActuallyUsed = true;
+                }
+                if (step.type === 'model_output' && (step as any).content) {
+                  for (const contentBlock of (step as any).content) {
+                    if (contentBlock.type === 'text') {
+                      fullResponseText += contentBlock.text || '';
+                      if (contentBlock.annotations) {
+                        for (const ann of contentBlock.annotations) {
+                          if (ann.type === 'file_citation') {
+                            toolActuallyUsed = true;
+                            citations.push({
+                              fileName: ann.file_name || ann.source_file || authorizedDocumentTitles[0] || 'Tài liệu học tập',
+                              sourceText: ann.source || ann.text || undefined,
+                            });
+                          }
                         }
                       }
                     }
@@ -464,35 +714,38 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
                 }
               }
             }
-          }
 
-          if (!fullResponseText && (interaction as any).output_text) {
-            fullResponseText = (interaction as any).output_text;
-          }
+            if (!fullResponseText && (interaction as any).output_text) {
+              fullResponseText = (interaction as any).output_text;
+            }
 
-          if (fullResponseText) {
-            tokenCount = (interaction as any).usage?.total_tokens ?? (Math.ceil((studentQuestion.length + fullResponseText.length) / 4));
-            apiSucceeded = true;
+            if (fullResponseText) {
+              tokenCount = (interaction as any).usage?.total_tokens ?? Math.ceil((studentQuestion.length + fullResponseText.length) / 4);
+              apiSucceeded = true;
+            }
+          } catch (interactionsErr) {
+            console.warn('[GeminiService] Interactions API failed, proceeding to Direct Context Grounding:', interactionsErr);
           }
-        } catch (interactionsErr) {
-          console.warn('[GeminiService] Interactions API with File Search Store failed, using direct context grounding:', interactionsErr);
         }
-      }
 
-      // Strategy B: Direct Context Grounding via client.models.generateContent
-      // Seamlessly feeds lesson documents directly into Gemini's context window with multi-turn conversation memory
-      if (!apiSucceeded) {
-        const documentContext = mockDocumentSnippets.length > 0
-          ? `\n\n[TÀI LIỆU HỌC TẬP CHÍNH THỐNG ĐƯỢC GIÁO VIÊN CUNG CẤP]:\n${mockDocumentSnippets.join('\n\n---\n\n')}`
-          : '';
+        // Strategy B: Direct Context Grounding via client.models.generateContent
+        if (!apiSucceeded) {
+          const documentContext =
+            mockDocumentSnippets.length > 0
+              ? `\n\n[TÀI LIỆU HỌC TẬP CHÍNH THỐNG ĐƯỢC GIÁO VIÊN CUNG CẤP]:\n${mockDocumentSnippets.join('\n\n---\n\n')}`
+              : '';
 
-        const formattedHistory = (chatHistory && chatHistory.length > 0)
-          ? `\n\n[NGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ GIỮA CÔ VÀ EM]:\n` +
-            chatHistory.slice(-6).map(h => `${h.sender === 'user' ? 'Em' : 'Cô Dương'}: ${h.text}`).join('\n\n') +
-            `\n\n[CÂU HỎI TIẾP THEO HIỆN TẠI CỦA EM]:\n"${studentQuestion}"`
-          : `\n\n[CÂU HỎI HIỆN TẠI CỦA EM HỌC SINH]:\n"${studentQuestion}"`;
+          const formattedHistory =
+            chatHistory && chatHistory.length > 0
+              ? `\n\n[NGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ GIỮA CÔ VÀ EM]:\n` +
+                chatHistory
+                  .slice(-6)
+                  .map((h) => `${h.sender === 'user' ? 'Em' : 'Cô Dương'}: ${h.text}`)
+                  .join('\n\n') +
+                `\n\n[CÂU HỎI TIẾP THEO HIỆN TẠI CỦA EM]:\n"${studentQuestion}"`
+              : `\n\n[CÂU HỎI HIỆN TẠI CỦA EM HỌC SINH]:\n"${studentQuestion}"`;
 
-        const groundingPrompt = `
+          const groundingPrompt = `
 Em học sinh đang học tác phẩm văn học "${workTitle}".
 ${documentContext}
 ${formattedHistory}
@@ -509,106 +762,127 @@ ${formattedHistory}
    - Xưng "cô", gọi "em". Ấm áp, tận tâm, truyền cảm hứng văn học, giúp em hiểu bài và yêu thích môn học.
 `;
 
-        // Multi-model resilience: try activeModel first, fall back to stable alternatives if unavailable
-        const candidateModels = [
-          this.activeModel,
-          'gemini-3.6-flash',
-          'gemini-2.5-flash',
-          'gemini-1.5-flash',
-        ].filter((m, i, arr) => arr.indexOf(m) === i);
+          const candidateModels = [
+            this.activeModel,
+            'gemini-3.6-flash',
+            'gemini-2.5-flash',
+            'gemini-1.5-flash',
+          ].filter((m, i, arr) => arr.indexOf(m) === i);
 
-        let lastErr: any = null;
-        for (const candidateModel of candidateModels) {
-          try {
-            const response = await client.models.generateContent({
-              model: candidateModel,
-              contents: groundingPrompt,
-              config: {
-                systemInstruction,
-                temperature: 0.7,
-              },
-            });
+          let lastModelErr: any = null;
+          for (const candidateModel of candidateModels) {
+            try {
+              const response = await client.models.generateContent({
+                model: candidateModel,
+                contents: groundingPrompt,
+                config: {
+                  systemInstruction,
+                  temperature: 0.7,
+                },
+              });
 
-            if (response.text) {
-              fullResponseText = response.text;
-              tokenCount = Math.ceil((studentQuestion.length + fullResponseText.length) / 4);
-              toolActuallyUsed = true;
-              apiSucceeded = true;
-              actualModelUsed = candidateModel;
-              break;
+              if (response.text) {
+                fullResponseText = response.text;
+                tokenCount = Math.ceil((studentQuestion.length + fullResponseText.length) / 4);
+                toolActuallyUsed = true;
+                apiSucceeded = true;
+                actualModelUsed = candidateModel;
+                break;
+              }
+            } catch (modelErr: any) {
+              console.warn(`[GeminiService] Key ${this.maskKey(currentKey)} Model ${candidateModel} failed:`, modelErr.message);
+              lastModelErr = modelErr;
+              // If it's a quota or auth error on this key, no need to retry other models on the same dead key
+              if (this.isFailoverError(modelErr)) {
+                break;
+              }
             }
-          } catch (modelErr: any) {
-            console.warn(`[GeminiService] Model ${candidateModel} failed, trying next candidate:`, modelErr.message);
-            lastErr = modelErr;
+          }
+
+          if (!apiSucceeded && lastModelErr) {
+            throw lastModelErr;
+          }
+
+          if (authorizedDocumentTitles.length > 0 && !fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ')) {
+            citations.push({
+              fileName: authorizedDocumentTitles[0] || 'Tài liệu học tập',
+              sourceText: mockDocumentSnippets[0] ? mockDocumentSnippets[0].substring(0, 100) + '...' : undefined,
+            });
           }
         }
 
-        if (!apiSucceeded && lastErr) {
-          throw lastErr;
+        // Grounding verification rule
+        const lower = fullResponseText.toLowerCase();
+        const mentionsLackOfDocs =
+          lower.includes('chưa đủ thông tin') ||
+          lower.includes('không có thông tin') ||
+          lower.includes('tài liệu không nhắc') ||
+          lower.includes('không tìm thấy trong tài liệu') ||
+          lower.includes('chưa tìm thấy căn cứ');
+
+        const isNoSource = citations.length === 0 || mentionsLackOfDocs;
+
+        if (isNoSource && !mentionsLackOfDocs) {
+          const strictRefusal = `Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm "${workTitle}", cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!`;
+          return {
+            text: strictRefusal,
+            hasCitations: false,
+            citations: [],
+            tokenCount,
+            isNoSource: true,
+            toolConfigured: fileSearchStoreNames.length > 0,
+            toolActuallyUsed,
+            modelUsed: actualModelUsed,
+            isLiveAi: true,
+          };
         }
 
-        if (authorizedDocumentTitles.length > 0 && !fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ')) {
-          citations.push({
-            fileName: authorizedDocumentTitles[0] || 'Tài liệu học tập',
-            sourceText: mockDocumentSnippets[0] ? mockDocumentSnippets[0].substring(0, 100) + '...' : undefined,
-          });
-        }
-      }
-
-      // Grounding verification rule
-      const lower = fullResponseText.toLowerCase();
-      const mentionsLackOfDocs =
-        lower.includes('chưa đủ thông tin') ||
-        lower.includes('không có thông tin') ||
-        lower.includes('tài liệu không nhắc') ||
-        lower.includes('không tìm thấy trong tài liệu') ||
-        lower.includes('chưa tìm thấy căn cứ');
-
-      const isNoSource = citations.length === 0 || mentionsLackOfDocs;
-
-      // If no source and model didn't explicitly refuse, force strict refusal
-      if (isNoSource && !mentionsLackOfDocs) {
-        const strictRefusal = `Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm "${workTitle}", cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!`;
+        // Successfully generated response with this key
         return {
-          text: strictRefusal,
-          hasCitations: false,
-          citations: [],
+          text: fullResponseText,
+          hasCitations: citations.length > 0,
+          citations,
           tokenCount,
-          isNoSource: true,
+          isNoSource,
           toolConfigured: fileSearchStoreNames.length > 0,
           toolActuallyUsed,
           modelUsed: actualModelUsed,
           isLiveAi: true,
         };
-      }
+      } catch (keyErr: any) {
+        lastApiError = keyErr;
+        console.warn(
+          `[GeminiService] API Key #${keyIdx + 1} (${this.maskKey(currentKey)}) encountered error: ${keyErr.message}`
+        );
 
-      return {
-        text: fullResponseText,
-        hasCitations: citations.length > 0,
-        citations,
-        tokenCount,
-        isNoSource,
-        toolConfigured: fileSearchStoreNames.length > 0,
-        toolActuallyUsed,
-        modelUsed: actualModelUsed,
-        isLiveAi: true,
-      };
-    } catch (err: any) {
-      console.warn('[GeminiService] Error calling live Gemini API, gracefully falling back to local document engine:', err.message);
-      const mockRes = this.runMockFileSearch({
-        workTitle,
-        studentQuestion,
-        learningMode,
-        authorizedDocumentTitles,
-        mockDocumentSnippets,
-        chatHistory,
-      });
-      return {
-        ...mockRes,
-        isLiveAi: false,
-        modelUsed: 'Tài liệu giáo viên (Ngoại tuyến)',
-      };
+        if (this.isFailoverError(keyErr)) {
+          // Put this key into 60s cooldown
+          this.markKeyCooldown(currentKey, 60000);
+          console.warn(
+            `[GeminiService] Failover triggered: Key ${this.maskKey(currentKey)} will cooldown. Attempting next key in pool...`
+          );
+        }
+      }
     }
+
+    // 3. Fallback when all keys in pool failed
+    console.warn(
+      '[GeminiService] All API keys in pool failed or exhausted quota, gracefully falling back to local document engine:',
+      lastApiError?.message
+    );
+    const mockRes = this.runMockFileSearch({
+      workTitle,
+      studentQuestion,
+      learningMode,
+      authorizedDocumentTitles,
+      mockDocumentSnippets,
+      chatHistory,
+    });
+    return {
+      ...mockRes,
+      isLiveAi: false,
+      modelUsed: 'Tài liệu giáo viên (Ngoại tuyến)',
+    };
   }
 
   /**

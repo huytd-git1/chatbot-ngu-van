@@ -208,6 +208,8 @@ export class AdminController {
     const { apiKey, modelName, embeddingModel } = parsed.data;
     await GeminiService.updateAiConfig({ apiKey, modelName, embeddingModel });
 
+    const keyCount = apiKey ? GeminiService.parseKeys(apiKey).length : undefined;
+
     // Log admin action
     await query(
       `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
@@ -217,6 +219,7 @@ export class AdminController {
         JSON.stringify({
           modelName,
           hasNewApiKey: !!(apiKey && apiKey.trim() !== ''),
+          keyCount,
         }),
         req.ip,
       ]
