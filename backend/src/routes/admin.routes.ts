@@ -12,6 +12,14 @@ adminRouter.get('/teachers', AdminController.getTeachers);
 adminRouter.post('/teachers', AdminController.createTeacher);
 adminRouter.put('/teachers/:teacherId/test-role', AdminController.toggleTestRole);
 adminRouter.put('/teachers/:teacherId/classes', AdminController.assignClasses);
+adminRouter.delete('/teachers/:teacherId', AdminController.deleteTeacher);
+
+// Class management for Admin
+adminRouter.get('/classes', AdminController.getAllClasses);
+adminRouter.post('/classes', AdminController.createClass);
+adminRouter.delete('/classes/:classId', AdminController.deleteClass);
+adminRouter.get('/classes/:classId/students', AdminController.getStudentsInClass);
+adminRouter.delete('/students/:studentId', AdminController.deleteStudent);
 
 adminRouter.get('/settings', AdminController.getSystemSettings);
 adminRouter.put('/settings', AdminController.updateSystemSettings);

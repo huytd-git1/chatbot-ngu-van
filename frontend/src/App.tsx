@@ -27,8 +27,9 @@ export const App: React.FC = () => {
         if (res.user.mustChangePassword) {
           setIsForcedPasswordChange(true);
           setIsChangePasswordOpen(true);
+        } else {
+          await loadUserData(res.user);
         }
-        await loadUserData(res.user);
       } else {
         setUser(null);
       }
@@ -92,15 +93,19 @@ export const App: React.FC = () => {
     if (loggedInUser.mustChangePassword) {
       setIsForcedPasswordChange(true);
       setIsChangePasswordOpen(true);
+      // Wait for password change before loading protected data
+      return;
     }
     await loadUserData(loggedInUser);
   };
 
-  const handlePasswordChangeSuccess = () => {
+  const handlePasswordChangeSuccess = async () => {
     setIsChangePasswordOpen(false);
     setIsForcedPasswordChange(false);
     if (user) {
-      setUser({ ...user, mustChangePassword: false });
+      const updatedUser = { ...user, mustChangePassword: false };
+      setUser(updatedUser);
+      await loadUserData(updatedUser);
     }
   };
 

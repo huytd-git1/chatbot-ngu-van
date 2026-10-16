@@ -198,6 +198,18 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
+  const handleDeleteStudent = async (studentId: string, studentName: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn xóa học sinh "${studentName}" khỏi lớp này không? Dữ liệu tài khoản của học sinh sẽ bị xóa vĩnh viễn.`)) return;
+    try {
+      const res = await apiRequest(`/api/teacher/students/${studentId}`, { method: 'DELETE' });
+      alert(res.message);
+      loadStudents(selectedClassId);
+      loadClasses();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const handleCsvPreview = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!csvFile || !selectedClassId) return;
@@ -534,9 +546,16 @@ export const TeacherDashboard: React.FC = () => {
                         <button
                           onClick={() => handleToggleLock(s.id, s.is_active)}
                           title={s.is_active ? 'Khóa tài khoản' : 'Mở khóa tài khoản'}
-                          className={`p-1 rounded ${s.is_active ? 'hover:bg-red-100 text-red-600' : 'hover:bg-emerald-100 text-emerald-600'}`}
+                          className={`p-1 rounded ${s.is_active ? 'hover:bg-amber-100 text-amber-600' : 'hover:bg-emerald-100 text-emerald-600'}`}
                         >
                           {s.is_active ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteStudent(s.id, s.full_name)}
+                          title="Xóa học sinh khỏi lớp"
+                          className="p-1 rounded hover:bg-red-100 text-red-600"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </td>
                     </tr>

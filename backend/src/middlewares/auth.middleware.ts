@@ -38,12 +38,15 @@ export function authMiddleware(required = true) {
       req.sessionData = auth.session;
 
       // If user must change password and is accessing other endpoints, block
-      if (
-        auth.user.must_change_password &&
-        !req.path.includes('/auth/change-password') &&
-        !req.path.includes('/auth/logout') &&
-        !req.path.includes('/auth/me')
-      ) {
+      const fullUrl = req.originalUrl || (req.baseUrl + req.path);
+      const isAllowedEndpoint =
+        fullUrl.includes('change-password') ||
+        fullUrl.includes('logout') ||
+        fullUrl.endsWith('/me') ||
+        req.path.includes('change-password') ||
+        req.path.includes('logout');
+
+      if (auth.user.must_change_password && !isAllowedEndpoint) {
         res.status(403).json({
           error: 'Vui lòng đổi mật khẩu trong lần đăng nhập đầu tiên trước khi tiếp tục.',
           code: 'MUST_CHANGE_PASSWORD',

@@ -29,6 +29,7 @@ teacherRouter.post('/classes/:classId/import-csv', TeacherController.executeCsvI
 teacherRouter.put('/students/:studentId/lock', TeacherController.toggleStudentLock);
 teacherRouter.post('/students/:studentId/reset-password', TeacherController.resetStudentPassword);
 teacherRouter.post('/students/:studentId/grant-quota', TeacherController.grantExtraQuota);
+teacherRouter.delete('/students/:studentId', TeacherController.deleteStudent);
 
 // Works & Documents management
 teacherRouter.get('/works', TeacherController.getWorks);

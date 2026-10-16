@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
 import {
   Power, Settings, History, Sparkles,
   CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu,
-  Layers, RefreshCw, Zap, ShieldCheck
+  Layers, RefreshCw, Zap, ShieldCheck,
+  Trash2, Users, GraduationCap, Plus, BookOpen, Lock, Unlock, KeyRound, X, Award
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
 
 export const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'teachers' | 'ai' | 'system' | 'logs'>('teachers');
+  const [activeTab, setActiveTab] = useState<'teachers' | 'classes' | 'ai' | 'system' | 'logs'>('teachers');
 
   // Teachers
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -15,6 +15,19 @@ export const AdminDashboard: React.FC = () => {
   const [newPassword, setNewPassword] = useState('GiaoVien@2026!');
   const [newFullName, setNewFullName] = useState('');
   const [newIsTestTeacher, setNewIsTestTeacher] = useState(false);
+
+  // Teacher Class Assignment Modal
+  const [assignModalTeacher, setAssignModalTeacher] = useState<any | null>(null);
+  const [selectedAssignClassIds, setSelectedAssignClassIds] = useState<string[]>([]);
+  const [savingAssignments, setSavingAssignments] = useState(false);
+
+  // Classes & Students management (Admin supreme view)
+  const [classes, setClasses] = useState<any[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [classStudents, setClassStudents] = useState<any[]>([]);
+  const [loadingClassStudents, setLoadingClassStudents] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+  const [newClassGrade, setNewClassGrade] = useState(9);
 
   // System settings
   const [dailyLimit, setDailyLimit] = useState(20);
@@ -62,6 +75,7 @@ export const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     loadTeachers();
+    loadClasses();
     loadSettings();
     loadAiSettings();
     loadLogs();
@@ -72,6 +86,31 @@ export const AdminDashboard: React.FC = () => {
       const data = await apiRequest('/api/admin/teachers');
       setTeachers(data.teachers || []);
     } catch {}
+  };
+
+  const loadClasses = async () => {
+    try {
+      const data = await apiRequest('/api/admin/classes');
+      const cls = data.classes || [];
+      setClasses(cls);
+      if (cls.length > 0 && !selectedClassId) {
+        setSelectedClassId(cls[0].id);
+        loadClassStudents(cls[0].id);
+      }
+    } catch {}
+  };
+
+  const loadClassStudents = async (classId: string) => {
+    if (!classId) return;
+    setLoadingClassStudents(true);
+    try {
+      const data = await apiRequest(`/api/admin/classes/${classId}/students`);
+      setClassStudents(data.students || []);
+    } catch {
+      setClassStudents([]);
+    } finally {
+      setLoadingClassStudents(false);
+    }
   };
 
   const loadSettings = async () => {
@@ -131,6 +170,53 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleDeleteTeacher = async (teacherId: string, fullName: string, username: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn XÓA tài khoản giáo viên "${fullName}" (@${username}) không?\n\nLưu ý: Mọi phân công lớp học của giáo viên này sẽ bị hủy bỏ vĩnh viễn.`)) {
+      return;
+    }
+
+    try {
+      const res = await apiRequest(`/api/admin/teachers/${teacherId}`, { method: 'DELETE' });
+      alert(res.message);
+      loadTeachers();
+      loadClasses();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleOpenAssignModal = (teacher: any) => {
+    setAssignModalTeacher(teacher);
+    setSelectedAssignClassIds((teacher.assignedClasses || []).map((c: any) => c.id));
+  };
+
+  const handleToggleAssignClass = (classId: string) => {
+    if (selectedAssignClassIds.includes(classId)) {
+      setSelectedAssignClassIds(selectedAssignClassIds.filter((id) => id !== classId));
+    } else {
+      setSelectedAssignClassIds([...selectedAssignClassIds, classId]);
+    }
+  };
+
+  const handleSaveAssignments = async () => {
+    if (!assignModalTeacher) return;
+    setSavingAssignments(true);
+    try {
+      const res = await apiRequest(`/api/admin/teachers/${assignModalTeacher.id}/classes`, {
+        method: 'PUT',
+        body: JSON.stringify({ classIds: selectedAssignClassIds }),
+      });
+      alert(res.message);
+      setAssignModalTeacher(null);
+      loadTeachers();
+      loadClasses();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingAssignments(false);
+    }
+  };
+
   const handleToggleTestRole = async (teacherId: string, currentStatus: boolean) => {
     try {
       const res = await apiRequest(`/api/admin/teachers/${teacherId}/test-role`, {
@@ -139,6 +225,73 @@ export const AdminDashboard: React.FC = () => {
       });
       alert(res.message);
       loadTeachers();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Class & Student Actions (Admin supreme view)
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClassName.trim()) return;
+    try {
+      const res = await apiRequest('/api/admin/classes', {
+        method: 'POST',
+        body: JSON.stringify({ name: newClassName.trim(), grade: newClassGrade }),
+      });
+      alert(res.message);
+      setNewClassName('');
+      loadClasses();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDeleteClass = async (classId: string, className: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn xóa lớp "${className}" không? Chỉ có thể xóa lớp khi không có học sinh.`)) return;
+    try {
+      const res = await apiRequest(`/api/admin/classes/${classId}`, { method: 'DELETE' });
+      alert(res.message);
+      loadClasses();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleDeleteStudent = async (studentId: string, studentName: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn XÓA học sinh "${studentName}" khỏi lớp này không?\n\nTài khoản học sinh sẽ bị xóa vĩnh viễn khỏi toàn bộ hệ thống.`)) return;
+    try {
+      const res = await apiRequest(`/api/admin/students/${studentId}`, { method: 'DELETE' });
+      alert(res.message);
+      loadClassStudents(selectedClassId);
+      loadClasses();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleResetStudentPassword = async (studentId: string) => {
+    const tempPass = prompt('Nhập mật khẩu tạm thời mới cho học sinh (tối thiểu 6 ký tự):', 'HocSinh@2026!');
+    if (!tempPass) return;
+    try {
+      const res = await apiRequest(`/api/teacher/students/${studentId}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({ tempPassword: tempPass }),
+      });
+      alert(res.message);
+      loadClassStudents(selectedClassId);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleToggleStudentLock = async (studentId: string, currentActive: boolean) => {
+    try {
+      await apiRequest(`/api/teacher/students/${studentId}/lock`, {
+        method: 'PUT',
+        body: JSON.stringify({ isActive: !currentActive }),
+      });
+      loadClassStudents(selectedClassId);
     } catch (err: any) {
       alert(err.message);
     }
@@ -218,10 +371,11 @@ export const AdminDashboard: React.FC = () => {
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 mb-6 border-b border-[#e8e2d5] pb-3">
         {[
-          { id: 'teachers', label: 'Quản lý Giáo viên' },
+          { id: 'teachers', label: 'Quản lý Giáo viên', icon: Users },
+          { id: 'classes', label: 'Quản lý Lớp & Học sinh', icon: GraduationCap },
           { id: 'ai', label: 'Quản lý AI & Gemini Model', icon: Sparkles },
-          { id: 'system', label: 'Hạn mức & Công tắc khẩn cấp' },
-          { id: 'logs', label: 'Nhật ký kiểm toán' },
+          { id: 'system', label: 'Hạn mức & Công tắc khẩn cấp', icon: Settings },
+          { id: 'logs', label: 'Nhật ký kiểm toán', icon: History },
         ].map((t) => {
           const IconComponent = (t as any).icon;
           return (
@@ -246,7 +400,13 @@ export const AdminDashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Create teacher form */}
           <div className="bg-white p-5 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-4">
-            <h3 className="text-base font-bold text-[#0f2942]">Tạo tài khoản giáo viên</h3>
+            <h3 className="text-base font-bold text-[#0f2942] flex items-center gap-2">
+              <Users className="w-5 h-5 text-amber-600" />
+              Tạo tài khoản giáo viên
+            </h3>
+            <p className="text-xs text-slate-500">
+              Giáo viên là cấp quản lý thứ 2, có quyền quản lý học sinh và tài liệu văn học của các lớp được phân công.
+            </p>
             <form onSubmit={handleCreateTeacher} className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1">Tên đăng nhập:</label>
@@ -300,35 +460,38 @@ export const AdminDashboard: React.FC = () => {
                 type="submit"
                 className="w-full py-2.5 rounded-xl bg-[#0f2942] text-white text-xs font-semibold hover:bg-[#1e3a5f]"
               >
-                Tạo tài khoản
+                Tạo tài khoản giáo viên
               </button>
             </form>
           </div>
 
           {/* Teacher list */}
           <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-4">
-            <h3 className="text-base font-bold text-[#0f2942]">Danh sách giáo viên hệ thống</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#0f2942]">Danh sách giáo viên hệ thống</h3>
+              <span className="text-xs text-slate-500 font-semibold">{teachers.length} giáo viên</span>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-[#e8e2d5] text-slate-400 font-semibold">
-                    <th className="py-2">Tên đăng nhập</th>
-                    <th className="py-2">Họ tên</th>
-                    <th className="py-2">Lớp phụ trách</th>
-                    <th className="py-2">Quyền Test</th>
-                    <th className="py-2">Thao tác</th>
+                    <th className="py-2.5">Tên đăng nhập</th>
+                    <th className="py-2.5">Họ tên</th>
+                    <th className="py-2.5">Lớp phụ trách</th>
+                    <th className="py-2.5">Quyền Test</th>
+                    <th className="py-2.5 text-right">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
                   {teachers.map((t) => (
-                    <tr key={t.id} className="border-b border-slate-100 last:border-none">
-                      <td className="py-2.5 font-mono font-semibold text-[#0f2942]">{t.username}</td>
+                    <tr key={t.id} className="border-b border-slate-100 last:border-none hover:bg-slate-50">
+                      <td className="py-2.5 font-mono font-semibold text-[#0f2942]">@{t.username}</td>
                       <td className="py-2.5 font-medium">{t.full_name}</td>
                       <td className="py-2.5 text-slate-600">
                         {t.assignedClasses && t.assignedClasses.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {t.assignedClasses.map((c: any) => (
-                              <span key={c.id} className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 border border-amber-200 text-[10px]">
+                              <span key={c.id} className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-semibold">
                                 {c.name}
                               </span>
                             ))}
@@ -346,22 +509,322 @@ export const AdminDashboard: React.FC = () => {
                           <span className="text-slate-400 text-[11px]">Bình thường</span>
                         )}
                       </td>
-                      <td className="py-2.5">
+                      <td className="py-2.5 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          onClick={() => handleOpenAssignModal(t)}
+                          title="Phân công lớp phụ trách"
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200 inline-flex items-center gap-1"
+                        >
+                          <BookOpen className="w-3 h-3" />
+                          Phân lớp
+                        </button>
                         <button
                           onClick={() => handleToggleTestRole(t.id, t.is_test_teacher)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                          className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-all ${
                             t.is_test_teacher
                               ? 'bg-amber-100 text-amber-900 hover:bg-amber-200'
                               : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
                           }`}
                         >
-                          {t.is_test_teacher ? 'Thu hồi Test' : 'Cấp quyền Test'}
+                          {t.is_test_teacher ? 'Thu hồi Test' : 'Cấp Test'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTeacher(t.id, t.full_name, t.username)}
+                          title="Xóa giáo viên này khỏi hệ thống"
+                          className="p-1 rounded-lg hover:bg-red-100 text-red-600 transition-all inline-flex items-center"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </td>
                     </tr>
                   ))}
+                  {teachers.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        Chưa có giáo viên nào trong hệ thống.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: CLASSES & STUDENTS (Admin Supreme Management) */}
+      {activeTab === 'classes' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Class list and creator */}
+          <div className="bg-white p-5 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#0f2942] flex items-center gap-2">
+                <GraduationCap className="w-5 h-5 text-amber-600" />
+                Danh sách lớp học toàn trường
+              </h3>
+              <span className="text-xs text-slate-500 font-semibold">{classes.length} lớp</span>
+            </div>
+
+            <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+              {classes.map((c) => (
+                <div
+                  key={c.id}
+                  onClick={() => {
+                    setSelectedClassId(c.id);
+                    loadClassStudents(c.id);
+                  }}
+                  className={`w-full text-left p-3 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
+                    selectedClassId === c.id
+                      ? 'bg-amber-50 border-amber-300 font-bold text-[#0f2942] shadow-2xs'
+                      : 'bg-white hover:bg-slate-50 border-[#e8e2d5] text-slate-700'
+                  }`}
+                >
+                  <div>
+                    <span className="text-xs font-bold text-[#0f2942]">{c.name}</span>
+                    <span className="text-[11px] text-slate-500 ml-1.5">(Khối {c.grade})</span>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {c.teacher_count || 0} GV phụ trách
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">
+                      {c.student_count ?? 0} HS
+                    </span>
+                    {Number(c.student_count) === 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClass(c.id, c.name);
+                        }}
+                        title="Xóa lớp rỗng này"
+                        className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {classes.length === 0 && (
+                <p className="text-xs text-slate-400 py-4 text-center">Chưa có lớp nào được tạo.</p>
+              )}
+            </div>
+
+            <form onSubmit={handleCreateClass} className="pt-4 border-t border-[#e8e2d5] space-y-2">
+              <span className="text-xs font-semibold text-slate-700 block">Tạo lớp học mới:</span>
+              <input
+                type="text"
+                placeholder="Ví dụ: Lớp 10A1, Lớp 12D..."
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                className="w-full text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4]"
+                required
+              />
+              <div className="flex gap-2">
+                <select
+                  value={newClassGrade}
+                  onChange={(e) => setNewClassGrade(Number(e.target.value))}
+                  className="w-1/2 text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4]"
+                >
+                  {[6, 7, 8, 9, 10, 11, 12].map((g) => (
+                    <option key={g} value={g}>Khối {g}</option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="w-1/2 text-xs font-semibold bg-[#0f2942] text-white rounded-xl py-2 hover:bg-[#1e3a5f] flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Thêm lớp
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Student roster in chosen class */}
+          <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-[#0f2942]">
+                  Danh sách học sinh:{' '}
+                  <span className="text-amber-800">
+                    {classes.find((c) => c.id === selectedClassId)?.name || 'Chưa chọn lớp'}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Là Quản trị viên tối cao, bạn có quyền xóa học sinh, đặt lại mật khẩu và khóa tài khoản học sinh ở bất kỳ lớp nào.
+                </p>
+              </div>
+              <span className="text-xs text-slate-500 font-semibold shrink-0">
+                {classStudents.length} học sinh
+              </span>
+            </div>
+
+            {loadingClassStudents ? (
+              <div className="py-12 flex justify-center items-center text-slate-400 gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-[#0f2942]" />
+                <span className="text-xs">Đang tải danh sách học sinh...</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-[#e8e2d5] text-slate-400 font-semibold">
+                      <th className="py-2.5">Mã HS</th>
+                      <th className="py-2.5">Họ và tên</th>
+                      <th className="py-2.5">Tên đăng nhập</th>
+                      <th className="py-2.5">Trạng thái</th>
+                      <th className="py-2.5">Mật khẩu</th>
+                      <th className="py-2.5 text-right">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {classStudents.map((s) => (
+                      <tr key={s.id} className="border-b border-slate-100 last:border-none hover:bg-slate-50">
+                        <td className="py-2.5 font-bold font-mono text-[#0f2942]">{s.student_code}</td>
+                        <td className="py-2.5 font-medium">{s.full_name}</td>
+                        <td className="py-2.5 font-mono text-slate-600">@{s.username}</td>
+                        <td className="py-2.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              s.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            {s.is_active ? 'Hoạt động' : 'Đã khóa'}
+                          </span>
+                        </td>
+                        <td className="py-2.5">
+                          {s.must_change_password ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                              Chưa đổi MK đầu
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700">
+                              Đã đổi riêng
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right space-x-1 whitespace-nowrap">
+                          <button
+                            onClick={() => handleResetStudentPassword(s.id)}
+                            title="Đặt lại mật khẩu tạm thời"
+                            className="p-1 rounded hover:bg-slate-200 text-slate-700 transition-all"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleStudentLock(s.id, s.is_active)}
+                            title={s.is_active ? 'Khóa tài khoản' : 'Mở khóa tài khoản'}
+                            className={`p-1 rounded transition-all ${
+                              s.is_active ? 'hover:bg-amber-100 text-amber-600' : 'hover:bg-emerald-100 text-emerald-600'
+                            }`}
+                          >
+                            {s.is_active ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStudent(s.id, s.full_name)}
+                            title="XÓA học sinh này khỏi lớp và hệ thống"
+                            className="p-1 rounded hover:bg-red-100 text-red-600 transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {classStudents.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-400">
+                          Chưa có học sinh nào trong lớp này. Giáo viên phụ trách có thể thêm học sinh hoặc nhập bằng file CSV.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TEACHER CLASS ASSIGNMENT MODAL */}
+      {assignModalTeacher && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-[#e8e2d5] relative animate-in fade-in zoom-in-95">
+            <button
+              onClick={() => setAssignModalTeacher(null)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-900 shrink-0">
+                <BookOpen className="w-5 h-5 text-amber-800" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#0f2942]">
+                  Phân công lớp cho giáo viên
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {assignModalTeacher.full_name} (@{assignModalTeacher.username})
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-3">
+              Tích chọn các lớp mà giáo viên này có quyền giảng dạy và quản lý học sinh:
+            </p>
+
+            <div className="space-y-2 max-h-[260px] overflow-y-auto border border-[#e8e2d5] rounded-xl p-3 bg-[#fbf9f4]">
+              {classes.map((c) => {
+                const isAssigned = selectedAssignClassIds.includes(c.id);
+                return (
+                  <label
+                    key={c.id}
+                    onClick={() => handleToggleAssignClass(c.id)}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-center justify-between text-xs ${
+                      isAssigned
+                        ? 'bg-white border-[#0f2942] ring-1 ring-[#0f2942] font-semibold text-[#0f2942]'
+                        : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={isAssigned}
+                        onChange={() => {}} // Controlled by label click
+                        className="rounded text-[#0f2942]"
+                      />
+                      <span>{c.name} (Khối {c.grade})</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      {c.student_count || 0} HS
+                    </span>
+                  </label>
+                );
+              })}
+              {classes.length === 0 && (
+                <p className="text-xs text-slate-400 text-center py-4">Chưa có lớp học nào trong hệ thống.</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-[#e8e2d5]">
+              <button
+                type="button"
+                onClick={() => setAssignModalTeacher(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAssignments}
+                disabled={savingAssignments}
+                className="px-5 py-2 rounded-xl bg-[#0f2942] text-white text-xs font-semibold hover:bg-[#1e3a5f] flex items-center gap-1.5"
+              >
+                {savingAssignments && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Lưu phân công
+              </button>
             </div>
           </div>
         </div>
