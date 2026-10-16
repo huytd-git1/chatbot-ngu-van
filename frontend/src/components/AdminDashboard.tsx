@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import {
   Power, Settings, History, Sparkles,
   CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu,
