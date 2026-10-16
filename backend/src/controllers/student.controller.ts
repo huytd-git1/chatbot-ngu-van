@@ -189,8 +189,18 @@ export class StudentController {
     const storeNames = Array.from(new Set(docsRes.rows.map(d => d.file_search_store_name)));
     const docTitles = docsRes.rows.map(d => d.title);
     const mockSnippets = docsRes.rows
-      .map(d => d.raw_content || '')
-      .filter(c => c.length > 0);
+      .filter(d => (d.raw_content || '').trim().length > 0)
+      .map(d => {
+        const typeLabel =
+          d.doc_type === 'text_primary'
+            ? 'Văn bản nguyên tác'
+            : d.doc_type === 'analysis'
+            ? 'Tài liệu phân tích chuyên sâu'
+            : d.doc_type === 'lesson_plan'
+            ? 'Giáo án bài giảng'
+            : 'Hướng dẫn hỏi đáp đọc hiểu';
+        return `[TÀI LIỆU CHÍNH THỨC: "${d.title}" | PHÂN LOẠI: ${typeLabel}]:\n${d.raw_content}`;
+      });
 
     // 4. Retrieve teacher learning settings if prep_and_review mode
     let prepReviewSettings: { prepQuestions?: string; reviewQuestions?: string; learningGoals?: string } | undefined;

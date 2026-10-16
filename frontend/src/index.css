@@ -61,11 +61,16 @@
 
 .prose-cu-duong blockquote {
   border-left: 4px solid #d97706;
-  background-color: #fdfbf7;
-  padding: 0.5rem 1rem;
-  margin: 0.75rem 0;
+  background-color: #fdf6ec;
+  border-radius: 0 0.75rem 0.75rem 0;
+  padding: 0.65rem 1rem;
+  margin: 0.85rem 0;
   font-style: italic;
-  color: #475569;
+  color: #1e293b;
+  border-top: 1px solid rgba(217, 119, 6, 0.15);
+  border-right: 1px solid rgba(217, 119, 6, 0.15);
+  border-bottom: 1px solid rgba(217, 119, 6, 0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .prose-cu-duong ul, .prose-cu-duong ol {

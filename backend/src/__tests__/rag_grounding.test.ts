@@ -80,4 +80,22 @@ Biên soạn bởi: Cô Dương
     expect(result.text).toContain('Kết bài');
     expect(result.text).toContain('cô không viết thay');
   });
+
+  it('enforces Contextual RAG with exact verbatim quotes in blockquotes', async () => {
+    const result = await GeminiService.executeRagQuery({
+      workTitle: 'Lặng lẽ Sa Pa',
+      learningMode: 'qa',
+      studentQuestion: 'Điều này chứng minh vẻ đẹp tư tưởng sâu sắc mà tác giả muốn truyền tải gì hả cô?',
+      fileSearchStoreNames: ['fileSearchStores/work_test_store'],
+      authorizedDocumentTitles: ['Tài liệu Cô Dương biên soạn'],
+      mockDocumentSnippets: [controlledDocText],
+    });
+
+    expect(result.isNoSource).toBe(false);
+    expect(result.hasCitations).toBe(true);
+    // Verifies markdown blockquote with exact quotation marks
+    expect(result.text).toMatch(/>\s*"[^"]+"/);
+    expect(result.text).toContain('Tài liệu Cô Dương biên soạn');
+    expect(result.text).toContain('tư tưởng');
+  });
 });

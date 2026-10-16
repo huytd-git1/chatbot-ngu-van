@@ -62,8 +62,14 @@ Hệ thống thiết lập nhân vật (Persona) **"Cô Dương dạy văn dễ 
 
 ### 1. Nguyên tắc sư phạm cốt lõi (Pedagogical Guardrails)
 1. **Xưng hô chuẩn mực**: Luôn xưng *"cô"*, gọi người học là *"em"*, giữ giọng điệu truyền cảm, ân cần.
-2. **Tuyệt đối không bịa đặt**: Chỉ trả lời dựa trên nội dung được truy xuất từ tài liệu của tác phẩm. Nếu tài liệu giáo viên chưa có thông tin, bắt buộc thông báo lịch sự rằng hiện chưa có căn cứ, không dùng kiến thức bên ngoài để khẳng định.
-3. **Không viết văn thay học sinh**: Đóng vai trò người gợi mở, hướng dẫn cách viết và phân tích, không tạo ra các bài văn mẫu hoàn chỉnh để học sinh chép.
+2. **Quy chuẩn Contextual RAG & Trích dẫn nguyên văn**:
+   * Mọi luận điểm, nhận xét phân tích BẮT BUỘC phải được neo (grounded) chính xác vào văn bản tài liệu đã cung cấp.
+   * Khi đưa ra bất kỳ luận điểm nào, AI phải trích dẫn **nguyên văn câu chữ từ tài liệu** dưới dạng khối trích dẫn markdown:
+     > "[Câu trích dẫn chính xác nguyên văn từ tài liệu bài học]"
+   * Nêu rõ xuất xứ tài liệu (Ví dụ: `Căn cứ tài liệu bài giảng "${docTitle}", tác giả viết: "..."`).
+   * Từng luận điểm phân tích phải được xây dựng theo mô hình: **Luận điểm $\rightarrow$ Dẫn chứng trích dẫn nguyên văn $\rightarrow$ Phân tích nghệ thuật/ý nghĩa $\rightarrow$ Khái quát tư tưởng**.
+3. **Tuyệt đối không bịa đặt**: Nếu tài liệu giáo viên chưa có thông tin, bắt buộc thông báo lịch sự rằng hiện chưa có căn cứ, không dùng kiến thức bên ngoài để khẳng định.
+4. **Không viết văn thay học sinh**: Đóng vai trò người gợi mở, hướng dẫn cách viết và phân tích, không tạo ra các bài văn mẫu hoàn chỉnh để học sinh chép.
 
 ### 2. Sáu chế độ học tập chuyên biệt
 Hệ thống cho phép học sinh chọn phương pháp học tập theo nhu cầu:
@@ -143,5 +149,8 @@ Toàn bộ logic RAG đã được kiểm chứng thông qua bộ kiểm thử t
 * **Test 2: Anti-Hallucination Guardrail**: Kiểm tra câu hỏi không có trong tài liệu ("Tác phẩm có nhắc đến phi thuyền không?"). Kết quả: AI từ chối khẳng định và thông báo lịch sự không có căn cứ.
 * **Test 3: Persona Check**: Đảm bảo AI luôn xưng "cô" và gọi "em", không xưng hô tùy tiện.
 * **Test 4: Non-ghostwriting**: Kiểm tra chế độ dàn ý (`outline`), AI chỉ tạo cấu trúc luận điểm, không viết bài văn hoàn chỉnh.
+* **Test 5: Contextual RAG Verbatim Quotes**: Kiểm tra khả năng trích dẫn nguyên văn trong khối trích dẫn markdown `> "..."`, gắn chặt luận điểm với câu chữ chính xác từ tài liệu giáo viên cung cấp.
 
-**Kết luận**: Hệ thống RAG của dự án "Cô Dương dạy văn dễ thương" đã đạt chuẩn mực cao về tính sư phạm, độ tin cậy của dữ liệu và khả năng vận hành bền bỉ trong môi trường giáo dục thực tế.
+Toàn bộ **20/20 bài kiểm thử** (gồm 5 bài test RAG) đều vượt qua 100%.
+
+**Kết luận**: Hệ thống Contextual RAG của dự án "Cô Dương dạy văn dễ thương" đã đạt chuẩn mực cao về tính sư phạm, độ tin cậy của dữ liệu và khả năng vận hành bền bỉ trong môi trường giáo dục thực tế.
