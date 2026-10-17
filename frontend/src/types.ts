@@ -73,6 +73,36 @@ export interface FileCitation {
   sourceText?: string;
 }
 
+export interface ClaimVerificationItem {
+  claim_id: string;
+  claim: string;
+  claim_type: 'factual' | 'interpretive' | 'instructional';
+  is_verified: boolean;
+  badge_label: string;
+  rejection_reason?: string;
+  semantic_verdict?: 'supported' | 'partial' | 'contradicted' | 'insufficient';
+}
+
+export interface VerificationMetrics {
+  citation_precision: number;
+  citation_recall: number;
+  exact_quote_match_rate: number;
+  total_claims: number;
+  verified_claims: number;
+  unverified_claims: number;
+  latency_ms: number;
+  cache_hit: boolean;
+  is_mock?: boolean;
+}
+
+export interface AnswerVerificationMeta {
+  metrics: VerificationMetrics;
+  results: ClaimVerificationItem[];
+  isFullyVerified: boolean;
+  isPartial: boolean;
+  isUnsupported: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'ai';
@@ -82,7 +112,10 @@ export interface ChatMessage {
   toolActuallyUsed?: boolean;
   modelUsed?: string;
   isLiveAi?: boolean;
+  isCached?: boolean;
+  verification?: AnswerVerificationMeta;
   timestamp: string;
 }
 
 export type LearningMode = 'qa' | 'character_analysis' | 'outline' | 'reading_comprehension' | 'essay_feedback' | 'prep_and_review';
+

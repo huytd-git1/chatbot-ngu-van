@@ -282,4 +282,24 @@ pg_restore -d "postgresql://user:pass@host:5432/dbname" --clean --no-owner coduo
 
 ---
 
+## 13. Kiểm chứng câu trả lời RAG theo ý tưởng ALCE
+
+Hệ thống triển khai bộ kiểm chứng nguồn & dẫn chứng 2 tầng lấy cảm hứng từ nghiên cứu ALCE (*Enabling Large Language Models to Generate Text with Citations* - EMNLP 2023):
+- **Tầng 1 (Mã nguồn xác định)**: Kiểm tra phân quyền lớp học, đối chiếu nguyên văn Unicode NFC không bỏ dấu tiếng Việt, xác thực tương thích loại tài liệu nguồn.
+- **Tầng 2 (Ngữ nghĩa gộp)**: Gộp toàn bộ nhận định và đoạn trích chứng cứ trong 1 request Gemini duy nhất để đánh giá tính kéo theo ngữ nghĩa (`supported`, `partial`, `insufficient`, `contradicted`).
+- **PostgreSQL Cache & Release Policy**: Cache kết quả kiểm chứng 24 giờ, tái kiểm tra quyền khi đọc cache, gắn nhãn chính xác trên giao diện học sinh.
+
+### Chạy kiểm thử tự động:
+```bash
+# Chạy toàn bộ 35 unit & verification test cases
+npm test
+
+# Chạy kiểm thử tích hợp Live Gemini API (mặc định tắt để tránh phát sinh chi phí)
+npm run test:live
+```
+*(Chi tiết phương pháp và kết quả đo lường xem tại tài liệu [ANSWER_VERIFICATION_REPORT.md](docs/ANSWER_VERIFICATION_REPORT.md)).*
+
+---
+
 *Hệ thống được phát triển với tinh thần giáo dục tận tâm, nghiêm túc và bảo mật cao.*
+

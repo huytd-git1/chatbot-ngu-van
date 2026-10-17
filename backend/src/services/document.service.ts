@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { query } from '../db/pool.js';
 import { GeminiService } from './gemini.service.js';
 
@@ -97,6 +98,15 @@ export class DocumentService {
       [workId, title, docType, file.originalname, storeName, file.size, file.mimetype, initialStatus, rawContent, userId]
     );
     const documentId = docRes.rows[0].id;
+
+    // Index normalized passages for deterministic verification
+    if (rawContent) {
+      try {
+        await this.indexPassages(documentId, workId, docType, rawContent);
+      } catch (err) {
+        console.warn('[DocumentService] Failed to index initial passages:', err);
+      }
+    }
 
     // 5. Send file to Gemini File Search Store asynchronously
     try {
@@ -199,5 +209,172 @@ export class DocumentService {
    */
   static async deleteDocument(documentId: string): Promise<void> {
     await query(`DELETE FROM documents WHERE id = $1`, [documentId]);
+  }
+
+  /**
+   * Normalizes text for exact deterministic matching:
+   * Unicode NFC, whitespace normalization, trim.
+   * Preserves Vietnamese diacritics.
+   */
+  static normalizeText(text: string): string {
+    if (!text) return '';
+    return text
+      .normalize('NFC')
+      .replace(/[\r\t\f\v]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Extracts distinct verifiable passages from raw document text
+   */
+  static extractPassages(
+    rawContent: string,
+    documentId: string,
+    workId: string,
+    docType: string
+  ): Array<{
+    documentId: string;
+    workId: string;
+    passageIndex: number;
+    passageId: string;
+    sourceType: string;
+    content: string;
+    normalizedContent: string;
+    contentHash: string;
+  }> {
+    if (!rawContent || !rawContent.trim()) return [];
+
+    const rawParagraphs = rawContent
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    const passages: Array<any> = [];
+    let idx = 0;
+
+    for (const para of rawParagraphs) {
+      if (para.length > 1500) {
+        const sentences = para.split(/(?<=[.?!;:\n])\s+/);
+        let chunk = '';
+        for (const s of sentences) {
+          if ((chunk + ' ' + s).length > 1000 && chunk.length > 0) {
+            const normalized = this.normalizeText(chunk);
+            const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+            passages.push({
+              documentId,
+              workId,
+              passageIndex: idx,
+              passageId: `${documentId}_p${idx}`,
+              sourceType: docType,
+              content: chunk,
+              normalizedContent: normalized,
+              contentHash: hash,
+            });
+            idx++;
+            chunk = s;
+          } else {
+            chunk = chunk ? chunk + ' ' + s : s;
+          }
+        }
+        if (chunk.trim()) {
+          const normalized = this.normalizeText(chunk);
+          const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+          passages.push({
+            documentId,
+            workId,
+            passageIndex: idx,
+            passageId: `${documentId}_p${idx}`,
+            sourceType: docType,
+            content: chunk,
+            normalizedContent: normalized,
+            contentHash: hash,
+          });
+          idx++;
+        }
+      } else {
+        const normalized = this.normalizeText(para);
+        const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+        passages.push({
+          documentId,
+          workId,
+          passageIndex: idx,
+          passageId: `${documentId}_p${idx}`,
+          sourceType: docType,
+          content: para,
+          normalizedContent: normalized,
+          contentHash: hash,
+        });
+        idx++;
+      }
+    }
+
+    return passages;
+  }
+
+  /**
+   * Indexes and persists passages into document_passages
+   */
+  static async indexPassages(
+    documentId: string,
+    workId: string,
+    docType: string,
+    rawContent: string
+  ): Promise<number> {
+    const passages = this.extractPassages(rawContent, documentId, workId, docType);
+    if (passages.length === 0) return 0;
+
+    try {
+      await query(`DELETE FROM document_passages WHERE document_id = $1`, [documentId]);
+      for (const p of passages) {
+        await query(
+          `INSERT INTO document_passages (document_id, work_id, passage_index, passage_id, source_type, content, normalized_content, content_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (document_id, passage_index) DO UPDATE
+           SET content = EXCLUDED.content,
+               normalized_content = EXCLUDED.normalized_content,
+               content_hash = EXCLUDED.content_hash`,
+          [p.documentId, p.workId, p.passageIndex, p.passageId, p.sourceType, p.content, p.normalizedContent, p.contentHash]
+        );
+      }
+    } catch (err) {
+      console.warn('[DocumentService] Failed to persist document passages:', err);
+    }
+
+    return passages.length;
+  }
+
+  /**
+   * Retrieves all authorized passages for a work and student class
+   */
+  static async getAuthorizedPassages(workId: string, classId?: string | null): Promise<Array<{
+    id: string;
+    documentId: string;
+    workId: string;
+    documentTitle: string;
+    passageId: string;
+    sourceType: string;
+    content: string;
+    normalizedContent: string;
+    contentHash: string;
+  }>> {
+    let sql = `
+      SELECT dp.id, dp.document_id, dp.work_id, d.title as document_title,
+             dp.passage_id, dp.source_type, dp.content, dp.normalized_content, dp.content_hash
+      FROM document_passages dp
+      JOIN documents d ON dp.document_id = d.id
+      WHERE dp.work_id = $1 AND d.status = 'ready'
+    `;
+    const params: any[] = [workId];
+
+    if (classId) {
+      sql += ` AND EXISTS (SELECT 1 FROM class_work_access cwa WHERE cwa.work_id = dp.work_id AND cwa.class_id = $2)`;
+      params.push(classId);
+    }
+
+    sql += ` ORDER BY dp.document_id, dp.passage_index ASC`;
+
+    const { rows } = await query(sql, params);
+    return rows;
   }
 }

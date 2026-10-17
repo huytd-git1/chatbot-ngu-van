@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { query } from '../db/pool.js';
 import { QuotaService } from '../services/quota.service.js';
 import { GeminiService } from '../services/gemini.service.js';
+import { DocumentService } from '../services/document.service.js';
+import { VerificationService } from '../services/verification.service.js';
 
 const askSchema = z.object({
   workId: z.string().uuid('ID tác phẩm không hợp lệ.'),
@@ -219,7 +221,62 @@ export class StudentController {
       }
     }
 
-    // 5. Execute RAG query via Gemini Service
+    // 5. Retrieve authorized passages for verification
+    let authorizedPassages = await DocumentService.getAuthorizedPassages(workId, classId);
+    if (authorizedPassages.length === 0) {
+      // If table is empty (e.g. before backfill or in-memory tests), extract on the fly from docsRes.rows
+      for (const d of docsRes.rows) {
+        if (d.raw_content) {
+          const extracted = DocumentService.extractPassages(d.raw_content, d.id, workId, d.doc_type);
+          authorizedPassages.push(
+            ...extracted.map((p) => ({
+              id: p.passageId,
+              documentId: p.documentId,
+              workId: p.workId,
+              documentTitle: d.title,
+              passageId: p.passageId,
+              sourceType: p.sourceType,
+              content: p.content,
+              normalizedContent: p.normalizedContent,
+              contentHash: p.contentHash,
+            }))
+          );
+        }
+      }
+    }
+
+    // 6. Check Verified Answer Cache (PostgreSQL)
+    const docHashes = authorizedPassages.map((p) => p.contentHash || p.passageId);
+    const cacheKey = VerificationService.computeCacheKey({
+      workId,
+      learningMode,
+      question,
+      docHashes,
+    });
+
+    const cachedAnswer = await VerificationService.getFromCache(cacheKey, workId, classId);
+    if (cachedAnswer) {
+      res.status(200).json({
+        answer: cachedAnswer.published_text,
+        citations: docsRes.rows.slice(0, 1).map((d) => ({ fileName: d.title })),
+        isNoSource: false,
+        toolConfigured: storeNames.length > 0,
+        toolActuallyUsed: true,
+        modelUsed: GeminiService.getAiConfigSummary().activeModel,
+        isLiveAi: GeminiService.isLiveApiConfigured(),
+        isCached: true,
+        verification: {
+          metrics: cachedAnswer.metrics,
+          results: cachedAnswer.verification_results,
+          isFullyVerified: cachedAnswer.is_fully_verified,
+          isPartial: cachedAnswer.is_partial,
+          isUnsupported: cachedAnswer.is_unsupported,
+        },
+      });
+      return;
+    }
+
+    // 7. Execute RAG query via Gemini Service
     try {
       const ragResult = await GeminiService.executeRagQuery({
         workTitle: work.title,
@@ -235,25 +292,56 @@ export class StudentController {
       if (ragResult.isNoSource) {
         // Record as no_source -> quota refunded/not deducted
         await QuotaService.recordNoSource(req.user.id, idempotencyKey, ragResult.text);
-      } else {
-        // Record as success -> quota deducted
-        await QuotaService.recordSuccess(
-          req.user.id,
-          idempotencyKey,
-          ragResult.text,
-          ragResult.citations,
-          ragResult.tokenCount
-        );
+        res.status(200).json({
+          answer: ragResult.text,
+          citations: ragResult.citations,
+          isNoSource: true,
+          toolConfigured: ragResult.toolConfigured,
+          toolActuallyUsed: ragResult.toolActuallyUsed,
+          modelUsed: ragResult.modelUsed || GeminiService.getAiConfigSummary().activeModel,
+          isLiveAi: ragResult.isLiveAi ?? GeminiService.isLiveApiConfigured(),
+        });
+        return;
       }
 
+      // 8. ALCE-inspired Verification Pipeline (Tầng 1 code check + Tầng 2 batched semantic check)
+      const verifiedResult = await VerificationService.verifyAnswer({
+        question,
+        workTitle: work.title,
+        workId,
+        classId,
+        learningMode,
+        draftAnswerText: ragResult.text,
+        authorizedPassages,
+        authorizedDocIds: docsRes.rows.map((d) => d.id),
+        isMock: !ragResult.isLiveAi,
+      });
+
+      // Record as success -> quota deducted once per user question, audit verification meta
+      await QuotaService.recordSuccess(
+        req.user.id,
+        idempotencyKey,
+        verifiedResult.published_text,
+        ragResult.citations,
+        ragResult.tokenCount,
+        verifiedResult.verification_meta
+      );
+
       res.status(200).json({
-        answer: ragResult.text,
+        answer: verifiedResult.published_text,
         citations: ragResult.citations,
-        isNoSource: ragResult.isNoSource,
+        isNoSource: false,
         toolConfigured: ragResult.toolConfigured,
         toolActuallyUsed: ragResult.toolActuallyUsed,
         modelUsed: ragResult.modelUsed || GeminiService.getAiConfigSummary().activeModel,
         isLiveAi: ragResult.isLiveAi ?? GeminiService.isLiveApiConfigured(),
+        verification: {
+          metrics: verifiedResult.metrics,
+          results: verifiedResult.verification_results,
+          isFullyVerified: verifiedResult.is_fully_verified,
+          isPartial: verifiedResult.is_partial,
+          isUnsupported: verifiedResult.is_unsupported,
+        },
       });
     } catch (err: any) {
       console.error('[StudentController] RAG query failed:', err);

@@ -268,7 +268,8 @@ export class QuotaService {
     idempotencyKey: string,
     responseText: string,
     citationsMeta: any,
-    tokenCount: number
+    tokenCount: number,
+    verificationMeta?: any
   ): Promise<void> {
     const dateVn = this.getVietnamDateString();
 
@@ -288,9 +289,16 @@ export class QuotaService {
            grounding_status = 'has_citations',
            citations_meta = $1,
            response_text = $2,
-           token_count = $3
+           token_count = $3,
+           verification_meta = $5
        WHERE idempotency_key = $4`,
-      [JSON.stringify(citationsMeta), responseText, tokenCount, idempotencyKey]
+      [
+        JSON.stringify(citationsMeta),
+        responseText,
+        tokenCount,
+        idempotencyKey,
+        verificationMeta ? JSON.stringify(verificationMeta) : null,
+      ]
     );
   }
 

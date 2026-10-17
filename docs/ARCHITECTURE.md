@@ -60,3 +60,23 @@ Hệ thống là ứng dụng Web RAG (Retrieval-Augmented Generation) hỗ tr�
 - **Backend:** Node.js 24+, Express, TypeScript, `pg` (PostgreSQL), `argon2`, `otplib` (TOTP), `zod` (validation), `@google/genai` (SDK chính thức).
 - **Frontend:** React 19 / 18, Vite, TypeScript, Tailwind CSS, Lucide React, DOMPurify.
 - **Bảo mật:** Helmet, CORS (cùng origin production), HttpOnly SameSite Strict cookies, CSRF Token Header, Session Regeneration, Account Lockout & Rate Limiting.
+
+## 5. Kiến trúc Kiểm chứng Câu trả lời RAG theo ý tưởng ALCE
+Lấy cảm hứng từ bài báo *Enabling Large Language Models to Generate Text with Citations* (EMNLP 2023 - Princeton NLP), hệ thống bổ sung tầng kiểm chứng 2 lớp trước khi phát hành câu trả lời cho học sinh:
+
+1. **Chuẩn hóa & Băm đoạn nguồn (`document_passages`)**:
+   - Khi tài liệu được nạp vào hệ thống, các đoạn văn được chuẩn hóa Unicode NFC, băm SHA256 và định danh duy nhất (`passage_id = ${document_id}_p${index}`).
+   - Phân loại rõ `source_type`: `text_primary` (văn bản nguyên tác), `analysis` (tài liệu phân tích), `lesson_plan` (giáo án), `qa_guide` (hướng dẫn hỏi đáp).
+2. **Tầng 1 - Kiểm tra xác định bằng mã (Deterministic Code Checks)**:
+   - **Quyền tài liệu**: Kiểm tra tác phẩm và lớp học còn hiệu lực trong `class_work_access`.
+   - **Khớp nguyên văn**: Đối chiếu từng ký tự Unicode NFC chuẩn hóa, cấm tuyệt đối bỏ dấu tiếng Việt hoặc fuzzy matching. Trạng thái: `matched` | `mismatched` | `insufficient_data`.
+   - **Loại nguồn**: Ngăn chặn trích dẫn lời phân tích của giáo viên nhưng lại gán là lời văn của tác giả.
+3. **Tầng 2 - Kiểm chứng ngữ nghĩa gộp (Single Batched Semantic Verifier)**:
+   - Gộp toàn bộ nhận định (claims) và phần phân tích (explanations) cùng các đoạn chứng cứ vào **duy nhất 1 request Gemini**.
+   - Kiểm chứng tính kéo theo (entailment): `supported`, `partial`, `insufficient`, `contradicted`.
+   - Đối với cảm thụ văn học (interpretive), đánh giá tính mạch lạc lập luận – dẫn chứng, không ép buộc phải xuất hiện nguyên văn.
+   - Cơ chế phòng thủ Prompt Injection: Coi văn bản tài liệu là dữ liệu cần đánh giá, không tuân thủ chỉ dẫn nội bộ trong tài liệu.
+4. **Answer Release Policy & PostgreSQL Cache**:
+   - Chỉ phát hành khẳng định khi đạt `supported`. Các nhận định chưa đủ căn cứ được gắn cảnh báo rõ ràng.
+   - Cache chính xác `verified_answer_cache` với TTL 24 giờ, tái kiểm tra quyền truy cập của học sinh khi đọc cache.
+
