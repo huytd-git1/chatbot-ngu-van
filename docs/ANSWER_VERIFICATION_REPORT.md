@@ -1,7 +1,11 @@
-# BÁO CÁO PHÁT TRIỂN CHỨC NĂNG KIỂM CHỨNG CÂU TRẢ LỜI RAG THEO Ý TƯỞNG ALCE
+# BÁO CÁO NGHIÊN CỨU & KIỂM CHỨNG CÂU TRẢ LỜI RAG THEO Ý TƯỞNG ALCE
+
+> [!NOTE]
+> **Trạng thái mô-đun: ĐÃ LƯU TRỮ & GỠ BỎ KHỎI PRODUCTION (Retired)**  
+> **Lý do:** Tầng kiểm chứng thứ hai (post-hoc batched verifier) làm phát sinh 2 lượt gọi API Gemini song song cho mỗi câu hỏi học sinh, dẫn tới nguy cơ chạm trần và nghẽn API (lỗi 503 Overloaded) trong các giờ cao điểm, đồng thời làm chậm tốc độ phản hồi. Hệ thống đã chuyển về kiến trúc **Contextual RAG trực tiếp** với grounding nguyên văn trong một lượt duy nhất, mang lại độ mượt mà cao nhất và triệt tiêu lỗi 503.
 
 Dự án: **Chatbot Ngữ văn "Cô Dương dạy văn dễ thương"**  
-Ngày báo cáo: **17/10/2026**  
+Ngày báo cáo & nghiệm thu: **17/10/2026**  
 Kỹ sư phụ trách: **Antigravity AI Engineer**
 
 ---

@@ -282,22 +282,19 @@ pg_restore -d "postgresql://user:pass@host:5432/dbname" --clean --no-owner coduo
 
 ---
 
-## 13. Kiểm chứng câu trả lời RAG theo ý tưởng ALCE
+## 13. Cơ chế Grounding & Trích dẫn Tài liệu RAG
 
-Hệ thống triển khai bộ kiểm chứng nguồn & dẫn chứng 2 tầng lấy cảm hứng từ nghiên cứu ALCE (*Enabling Large Language Models to Generate Text with Citations* - EMNLP 2023):
-- **Tầng 1 (Mã nguồn xác định)**: Kiểm tra phân quyền lớp học, đối chiếu nguyên văn Unicode NFC không bỏ dấu tiếng Việt, xác thực tương thích loại tài liệu nguồn.
-- **Tầng 2 (Ngữ nghĩa gộp)**: Gộp toàn bộ nhận định và đoạn trích chứng cứ trong 1 request Gemini duy nhất để đánh giá tính kéo theo ngữ nghĩa (`supported`, `partial`, `insufficient`, `contradicted`).
-- **PostgreSQL Cache & Release Policy**: Cache kết quả kiểm chứng 24 giờ, tái kiểm tra quyền khi đọc cache, gắn nhãn chính xác trên giao diện học sinh.
+Hệ thống triển khai cơ chế Grounding trực tiếp từ tài liệu giáo viên đã phê duyệt thông qua Gemini File Search Tool / Vector Store với System Instruction chuẩn mực Sư phạm Ngữ văn:
+- **Nguyên tắc Sư phạm:** AI không bịa đặt nguồn, không trích dẫn sai văn bản gốc, bắt buộc từ chối khi không có tài liệu được cấp phép.
+- **Trích dẫn dẫn chứng trực quan:** Dẫn chứng văn học được đặt trong khối trích dẫn `> "..."` kèm xuất xứ tài liệu, hiển thị danh mục căn cứ rõ ràng trên giao diện học sinh.
+- **Tối ưu hiệu năng:** Trả lời trực tiếp từ kết quả RAG, không thực hiện các vòng lặp kiểm chứng trùng lặp gây nghẽn 503 và đảm bảo thời gian phản hồi nhanh nhất.
 
 ### Chạy kiểm thử tự động:
 ```bash
-# Chạy toàn bộ 35 unit & verification test cases
+# Chạy toàn bộ 20 unit & RAG grounding test cases
 npm test
-
-# Chạy kiểm thử tích hợp Live Gemini API (mặc định tắt để tránh phát sinh chi phí)
-npm run test:live
 ```
-*(Chi tiết phương pháp và kết quả đo lường xem tại tài liệu [ANSWER_VERIFICATION_REPORT.md](docs/ANSWER_VERIFICATION_REPORT.md)).*
+
 
 ---
 

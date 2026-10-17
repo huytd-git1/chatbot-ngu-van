@@ -131,7 +131,6 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         modelUsed?: string;
         isLiveAi?: boolean;
         isCached?: boolean;
-        verification?: any;
       }>('/api/student/ask', {
         method: 'POST',
         body: JSON.stringify({
@@ -153,7 +152,6 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         modelUsed: res.modelUsed,
         isLiveAi: res.isLiveAi,
         isCached: res.isCached,
-        verification: res.verification,
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       };
 
@@ -373,48 +371,12 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                           </div>
                         ))}
 
-                        {/* Verified Claims (ALCE Breakdown) */}
-                        {msg.verification && msg.verification.results && msg.verification.results.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-emerald-100/60 space-y-1">
-                            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-                              Mức độ xác thực từng nhận định:
-                            </div>
-                            {msg.verification.results.map((r: any, rIdx: number) => (
-                              <div
-                                key={rIdx}
-                                className={`p-1.5 rounded-lg text-[10px] border flex flex-col gap-0.5 ${
-                                  r.is_verified
-                                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                                    : 'bg-amber-50/70 border-amber-200 text-amber-900'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="font-medium truncate">{r.claim.substring(0, 60)}...</span>
-                                  <span
-                                    className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold ${
-                                      r.is_verified
-                                        ? 'bg-emerald-200/60 text-emerald-800'
-                                        : 'bg-amber-200/60 text-amber-800'
-                                    }`}
-                                  >
-                                    {r.badge_label}
-                                  </span>
-                                </div>
-                                {r.rejection_reason && (
-                                  <span className="text-[9px] text-amber-700 italic">
-                                    Lưu ý: {r.rejection_reason}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* AI Model & Verification Badges */}
+                {/* AI Model & Grounding Badges */}
                 {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
                   <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-1 text-[10px] sm:text-[11px]">
                     <div className="flex items-center gap-1.5">
@@ -437,26 +399,15 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                     </div>
 
                     <div className="flex items-center gap-1">
-                      {msg.verification ? (
-                        msg.verification.isFullyVerified ? (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            AI đã đối chiếu nhận định với nguồn
-                          </span>
-                        ) : msg.verification.isPartial ? (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 text-amber-600" />
-                            Một số ý chưa đủ căn cứ
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 text-rose-600" />
-                            Chưa đủ căn cứ
-                          </span>
-                        )
+                      {msg.isNoSource ? (
+                        <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 text-amber-600" />
+                          Chưa đủ căn cứ
+                        </span>
                       ) : (
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {msg.isNoSource ? 'Chưa đủ căn cứ' : 'RAG Grounded ✓'}
+                        <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Chuẩn tài liệu giáo viên ✓
                         </span>
                       )}
                     </div>

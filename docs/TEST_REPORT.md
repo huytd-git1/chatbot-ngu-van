@@ -9,14 +9,12 @@ Hệ thống ghi nhận kết quả kiểm thử thực tế theo từng phần,
 | Nhóm kiểm thử | File kiểm thử | Số ca test | Trạng thái | Thời gian thực thi | Kết quả |
 |---|---|---|---|---|---|
 | **1. Xác thực & Bảo mật (RBAC & Auth)** | `src/__tests__/auth.test.ts` | 4/4 | Đã chạy | ~1.25s | **PASS** (100%) |
-| **2. Hạn mức & Chống gian lận (Quota Engine)** | `src/__tests__/quota.test.ts` | 5/5 | Đã chạy | ~0.53s | **PASS** (100%) |
-| **3. Nhập danh sách học sinh CSV (CSV Import)** | `src/__tests__/csv_import.test.ts` | 3/3 | Đã chạy | ~0.64s | **PASS** (100%) |
-| **4. RAG & Grounding (Gemini Contextual RAG)** | `src/__tests__/rag_grounding.test.ts` | 5/5 | Đã chạy | ~0.22s | **PASS** (100%) |
-| **5. Kiểm chứng câu trả lời theo ALCE (ALCE Verification)** | `src/__tests__/alce_verification.test.ts` | 15/15 | Đã chạy | ~0.40s | **PASS** (100%) |
-| **6. Quản lý Gemini Key Pool & Failover** | `src/__tests__/key_pool.test.ts` | 3/3 | Đã chạy | ~0.01s | **PASS** (100%) |
-| **7. Kiểm thử Tích hợp Live API (test:live)** | `src/__tests__/live_api_verification.integration.test.ts` | 1 ca | Mặc định tắt | ~0.01s | **CHƯA CHẠY** (Không báo PASS) |
-| **8. Build & Typecheck Frontend + Backend** | `npm run build` | 2/2 | Đã chạy | ~2.00s | **PASS** (100%) |
-| **TỔNG CỘNG** | **6 unit suites + 2 builds** | **35 tests** | **Hoàn tất** | **~2.5s** | **100% PASS** |
+| **2. Hạn mức & Chống gian lận (Quota Engine)** | `src/__tests__/quota.test.ts` | 5/5 | Đã chạy | ~0.54s | **PASS** (100%) |
+| **3. Nhập danh sách học sinh CSV (CSV Import)** | `src/__tests__/csv_import.test.ts` | 3/3 | Đã chạy | ~0.62s | **PASS** (100%) |
+| **4. RAG & Grounding (Gemini Contextual RAG)** | `src/__tests__/rag_grounding.test.ts` | 5/5 | Đã chạy | ~0.20s | **PASS** (100%) |
+| **5. Quản lý Gemini Key Pool & Failover** | `src/__tests__/key_pool.test.ts` | 3/3 | Đã chạy | ~0.01s | **PASS** (100%) |
+| **6. Build & Typecheck Frontend + Backend** | `npm run build` | 2/2 | Đã chạy | ~2.50s | **PASS** (100%) |
+| **TỔNG CỘNG** | **5 unit suites + 2 builds** | **20 tests** | **Hoàn tất** | **~2.3s** | **100% PASS** |
 
 ---
 

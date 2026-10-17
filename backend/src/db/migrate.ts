@@ -227,41 +227,7 @@ export async function runMigrations() {
     );
     `,
     `
-    CREATE TABLE IF NOT EXISTS document_passages (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-      work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-      passage_index INTEGER NOT NULL,
-      passage_id VARCHAR(100) NOT NULL,
-      source_type VARCHAR(50) NOT NULL,
-      content TEXT NOT NULL,
-      normalized_content TEXT NOT NULL,
-      content_hash VARCHAR(64) NOT NULL,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      CONSTRAINT uq_doc_passage_idx UNIQUE (document_id, passage_index),
-      CONSTRAINT uq_doc_passage_id UNIQUE (passage_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_dp_work_id ON document_passages(work_id);
-    CREATE INDEX IF NOT EXISTS idx_dp_doc_id ON document_passages(document_id);
-    `,
-    `
-    CREATE TABLE IF NOT EXISTS verified_answer_cache (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      cache_key VARCHAR(64) UNIQUE NOT NULL,
-      work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-      learning_mode VARCHAR(50) NOT NULL,
-      prompt_hash VARCHAR(64) NOT NULL,
-      response_text TEXT NOT NULL,
-      structured_claims JSONB,
-      verification_report JSONB NOT NULL,
-      precision_score NUMERIC(5,2),
-      recall_score NUMERIC(5,2),
-      token_count INTEGER DEFAULT 0,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_vac_cache_key ON verified_answer_cache(cache_key);
-    CREATE INDEX IF NOT EXISTS idx_vac_expires_at ON verified_answer_cache(expires_at);
+    DROP TABLE IF EXISTS document_passages, verified_answer_cache CASCADE;
     `,
     `
     ALTER TABLE chat_requests ADD COLUMN IF NOT EXISTS verification_meta TEXT;
