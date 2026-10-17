@@ -204,8 +204,31 @@ export class VerificationService {
     for (const line of lines) {
       const trimmed = line.trim();
 
-      // Detection of Luận điểm / Point
-      const claimMatch = trimmed.match(/^(\*|\-|\d+\.)?\s*(Luận điểm|Ý chính|Nhận định|Đặc điểm)\s*(\d+)?\s*[:\-]\s*(.+)/i);
+      // Skip empty lines
+      if (!trimmed) continue;
+
+      // Detection of section break / pedagogical footer / meta prompts
+      const isMetaOrFooter = trimmed.match(
+        /^(?:#{1,6}\s*)?(?:KHÁI QUÁT TƯ TƯỞNG|Ý NGHĨA NHÂN ĐẠO|GỢI Ý|TỔNG KẾT|LƯU Ý|KẾT LUẬN)|(?:🎯\s*\*?\*?Gợi ý)|(?:Em thấy chi tiết nào)/i
+      );
+      if (isMetaOrFooter) {
+        if (currentClaim && currentClaim.claim) {
+          claims.push({
+            id: currentClaim.id || `c${claimCounter++}`,
+            claim: currentClaim.claim,
+            claim_type: currentClaim.claim_type || 'interpretive',
+            evidence_refs: currentClaim.evidence_refs || [],
+            explanation: currentClaim.explanation,
+          });
+          currentClaim = null;
+        }
+        continue;
+      }
+
+      // Detection of Luận điểm / Point / Heading (supports ### 1. Luận điểm 1: ...)
+      const claimMatch = trimmed.match(
+        /^(?:#{1,6}\s*)?(?:\*|\-|\d+\.)?\s*(?:Luận điểm|Ý chính|Nhận định|Đặc điểm)\s*(\d+)?\s*[:\-]\s*(.+)/i
+      );
       if (claimMatch) {
         if (currentClaim && currentClaim.claim) {
           claims.push({
@@ -218,7 +241,7 @@ export class VerificationService {
         }
         currentClaim = {
           id: `c${claimCounter++}`,
-          claim: claimMatch[4].trim(),
+          claim: claimMatch[2].trim(),
           claim_type: 'interpretive',
           evidence_refs: [],
         };
@@ -226,7 +249,7 @@ export class VerificationService {
       }
 
       // Detection of quote block: > "..."
-      const quoteMatch = trimmed.match(/^>\s*["“«]?([^"”»\n]+)["”»]?/);
+      const quoteMatch = trimmed.match(/^>\s*["“«]?([^"”»\n]{10,})["”»]?/);
       if (quoteMatch && currentClaim) {
         const quoteText = quoteMatch[1].trim();
         // Match against authorized passages to find passage_id and document_id
@@ -251,6 +274,11 @@ export class VerificationService {
         currentClaim.explanation = (currentClaim.explanation ? currentClaim.explanation + ' ' : '') + expMatch[3].trim();
         continue;
       }
+
+      // If text belongs to current active claim (and not a heading)
+      if (currentClaim && !trimmed.startsWith('#') && !trimmed.startsWith('🎯') && !trimmed.toLowerCase().startsWith('chào em')) {
+        currentClaim.explanation = (currentClaim.explanation ? currentClaim.explanation + ' ' : '') + trimmed;
+      }
     }
 
     // Push the final claim if exists
@@ -264,43 +292,49 @@ export class VerificationService {
       });
     }
 
-    // If no claims could be isolated via heuristics, treat substantive paragraphs as factual/interpretive
+    // Fallback: If no claims matched via headers/points, parse substantive paragraphs
     if (claims.length === 0) {
       const paragraphs = rawText
         .split(/\n\s*\n/)
         .map((p) => p.trim())
-        .filter((p) => p.length > 20 && !p.toLowerCase().includes('chào em'));
+        .filter((p) => {
+          if (p.length < 35) return false;
+          if (p.startsWith('#')) return false;
+          const lower = p.toLowerCase();
+          if (lower.startsWith('chào em') || lower.startsWith('để giúp em')) return false;
+          if (lower.includes('gợi ý nho nhỏ') || lower.includes('em thấy chi tiết nào')) return false;
+          return true;
+        });
 
-      paragraphs.forEach((p, idx) => {
-        // Find if paragraph has quotes
-        const quotes = p.match(/["“«]([^"”»]{5,})["”»]/g);
+      // Limit fallback to at most 4 key substantive claims
+      paragraphs.slice(0, 4).forEach((p, idx) => {
+        const blockQuoteMatch = p.match(/>\s*["“«]?([^"”»\n]{12,})["”»]?/);
         const evidenceRefs: EvidenceRef[] = [];
-        if (quotes) {
-          quotes.forEach((q) => {
-            const cleanQ = q.replace(/^["“«]|["”»]$/g, '').trim();
-            const matchedPassage = authorizedPassages.find((ap) =>
-              this.checkVerbatimQuote(cleanQ, ap.content) === 'matched'
-            );
-            evidenceRefs.push({
-              quote: cleanQ,
-              document_id: matchedPassage?.documentId,
-              passage_id: matchedPassage?.passageId,
-              document_title: matchedPassage?.documentTitle,
-              source_type: matchedPassage?.sourceType,
-            });
+        if (blockQuoteMatch) {
+          const cleanQ = blockQuoteMatch[1].trim();
+          const matchedPassage = authorizedPassages.find((ap) =>
+            this.checkVerbatimQuote(cleanQ, ap.content) === 'matched'
+          );
+          evidenceRefs.push({
+            quote: cleanQ,
+            document_id: matchedPassage?.documentId,
+            passage_id: matchedPassage?.passageId,
+            document_title: matchedPassage?.documentTitle,
+            source_type: matchedPassage?.sourceType,
           });
         }
 
         claims.push({
           id: `c${idx + 1}`,
-          claim: p,
+          claim: p.length > 250 ? p.substring(0, 250) + '...' : p,
           claim_type: 'interpretive',
           evidence_refs: evidenceRefs,
+          explanation: p.length > 250 ? p : undefined,
         });
       });
     }
 
-    return { displayText: rawText, claims };
+    return { displayText: rawText, claims: claims.slice(0, 6) };
   }
 
   /**
@@ -402,7 +436,32 @@ export class VerificationService {
   }
 
   /**
-   * Tầng 2: Semantic Verification (Single Batched API Call to Gemini)
+   * Sanitizes rejection reason to never leak internal raw JSON or technical errors to student UI
+   */
+  public static sanitizeRejectionReason(rawReason?: string): string {
+    if (!rawReason) return 'Chưa đủ căn cứ xác thực từ tài liệu bài học.';
+    if (rawReason.includes('503') || rawReason.includes('high demand') || rawReason.includes('UNAVAILABLE')) {
+      return 'Hệ thống AI đang quá tải tạm thời (503).';
+    }
+    if (rawReason.includes('429') || rawReason.includes('quota') || rawReason.includes('RESOURCE_EXHAUSTED')) {
+      return 'Hệ thống AI đạt hạn mức tạm thời (429).';
+    }
+    if (rawReason.includes('timeout') || rawReason.includes('AbortError') || rawReason.includes('deadline')) {
+      return 'Quá thời gian phản hồi bộ kiểm chứng (timeout).';
+    }
+    if (rawReason.startsWith('{') && rawReason.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(rawReason);
+        if (parsed.error?.message) {
+          return this.sanitizeRejectionReason(parsed.error.message);
+        }
+      } catch {}
+    }
+    return rawReason;
+  }
+
+  /**
+   * Tầng 2: Semantic Verification (Single Batched API Call to Gemini with Multi-Key Failover)
    * Sends student question, claims + explanations, and relevant candidate passages
    * Evaluates entailment (supported / partial / contradicted / insufficient)
    */
@@ -480,66 +539,77 @@ ${JSON.stringify(
 ${JSON.stringify(candidatePassages, null, 2)}
 `;
 
-    try {
-      const client = GeminiService.getClientForKey(GeminiService.getCandidateApiKeys()[0] || '');
-      if (!client) {
-        // Fallback for offline/mock test
-        substantiveClaims.forEach((c) => {
-          verdictMap.set(c.id, {
-            claim_id: c.id,
-            verdict: 'insufficient',
-            supporting_evidence_ids: [],
-            reason: 'Chế độ ngoại tuyến hoặc chưa cấu hình API Key kiểm chứng.',
-          });
-        });
-        return verdictMap;
-      }
-
-      const activeModel = GeminiService.getAiConfigSummary().activeModel || 'gemini-3.6-flash';
-
-      // Enforce timeout using AbortController
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-      const response = await client.models.generateContent({
-        model: activeModel,
-        contents: verifierPrompt,
-        config: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-        },
-      });
-      clearTimeout(timeoutId);
-
-      const responseText = response.text || '';
-      const parsedJson = JSON.parse(responseText);
-      const validated = SemanticVerificationResponseSchema.safeParse(parsedJson);
-
-      if (validated.success) {
-        for (const item of validated.data.results) {
-          verdictMap.set(item.claim_id, item);
-        }
-      } else {
-        console.warn('[VerificationService] Verifier returned invalid schema:', validated.error);
-        // Mark all claims as insufficient on invalid schema
-        substantiveClaims.forEach((c) => {
-          verdictMap.set(c.id, {
-            claim_id: c.id,
-            verdict: 'insufficient',
-            supporting_evidence_ids: [],
-            reason: 'Lỗi cấu trúc phản hồi từ bộ kiểm chứng.',
-          });
-        });
-      }
-    } catch (err: any) {
-      console.warn('[VerificationService] Semantic verification error or timeout:', err.message);
-      // Gracefully handle timeout/failure - NEVER mark as passed
+    const candidateKeys = GeminiService.getCandidateApiKeys();
+    if (candidateKeys.length === 0) {
       substantiveClaims.forEach((c) => {
         verdictMap.set(c.id, {
           claim_id: c.id,
           verdict: 'insufficient',
           supporting_evidence_ids: [],
-          reason: `Lỗi kết nối kiểm chứng: ${err.message || 'Hết thời gian chờ'}`,
+          reason: 'Chế độ ngoại tuyến hoặc chưa cấu hình API Key kiểm chứng.',
+        });
+      });
+      return verdictMap;
+    }
+
+    const candidateModels = [
+      GeminiService.getAiConfigSummary().activeModel,
+      'gemini-3.6-flash',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash',
+    ].filter((m, i, arr) => arr.indexOf(m) === i);
+
+    let apiSucceeded = false;
+    let lastError: any = null;
+
+    // Multi-key failover with model fallback
+    for (let keyIdx = 0; keyIdx < candidateKeys.length; keyIdx++) {
+      if (apiSucceeded) break;
+      const currentKey = candidateKeys[keyIdx];
+      const client = GeminiService.getClientForKey(currentKey);
+
+      for (const model of candidateModels) {
+        try {
+          const response = await client.models.generateContent({
+            model,
+            contents: verifierPrompt,
+            config: {
+              temperature: 0.1,
+              responseMimeType: 'application/json',
+            },
+          });
+
+          const responseText = response.text || '';
+          const parsedJson = JSON.parse(responseText);
+          const validated = SemanticVerificationResponseSchema.safeParse(parsedJson);
+
+          if (validated.success) {
+            for (const item of validated.data.results) {
+              verdictMap.set(item.claim_id, item);
+            }
+            apiSucceeded = true;
+            break;
+          }
+        } catch (modelErr: any) {
+          lastError = modelErr;
+          console.warn(`[VerificationService] Key ${GeminiService.maskKey(currentKey)} Model ${model} failed:`, modelErr.message);
+
+          if (GeminiService.isFailoverError(modelErr)) {
+            GeminiService.markKeyCooldown(currentKey, 45000);
+            break; // Switch to next key in pool
+          }
+        }
+      }
+    }
+
+    if (!apiSucceeded) {
+      const cleanReason = this.sanitizeRejectionReason(lastError?.message);
+      substantiveClaims.forEach((c) => {
+        verdictMap.set(c.id, {
+          claim_id: c.id,
+          verdict: 'insufficient',
+          supporting_evidence_ids: [],
+          reason: cleanReason,
         });
       });
     }
@@ -637,11 +707,11 @@ ${JSON.stringify(candidatePassages, null, 2)}
             supportedClaimsWithCitations++;
           }
         } else if (semanticVerdict === 'partial') {
-          rejectionReason = semanticItem?.reason || 'Chỉ một phần nhận định có căn cứ từ tài liệu.';
+          rejectionReason = this.sanitizeRejectionReason(semanticItem?.reason) || 'Chỉ một phần nhận định có căn cứ từ tài liệu.';
         } else if (semanticVerdict === 'contradicted') {
-          rejectionReason = semanticItem?.reason || 'Nhận định mâu thuẫn trực tiếp với tài liệu bài học.';
+          rejectionReason = this.sanitizeRejectionReason(semanticItem?.reason) || 'Nhận định mâu thuẫn trực tiếp với tài liệu bài học.';
         } else {
-          rejectionReason = semanticItem?.reason || 'Chưa đủ bằng chứng để xác thực nhận định này.';
+          rejectionReason = this.sanitizeRejectionReason(semanticItem?.reason) || 'Chưa đủ bằng chứng để xác thực nhận định này.';
         }
       }
 
@@ -691,13 +761,23 @@ ${JSON.stringify(candidatePassages, null, 2)}
     if (isUnsupported) {
       publishedText = `Chào em! Dựa trên các tài liệu đã được giáo viên cung cấp cho tác phẩm "${workTitle}", cô chưa tìm thấy căn cứ xác thực đầy đủ trong tài liệu bài học để khẳng định các nội dung trên. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy đối chiếu với văn bản bài học hoặc trao đổi thêm với giáo viên phụ trách nhé!`;
     } else if (isPartial) {
-      // Append cautionary notice for unverified sections
-      const unverifiedItems = verificationResults.filter((r) => !r.is_verified);
-      const warnings = unverifiedItems
-        .map((u) => `- Chi tiết: "${u.claim.substring(0, 60)}..." (${u.rejection_reason || 'Chưa đủ căn cứ xác thực'})`)
-        .join('\n');
+      // Check if failure was caused by AI overload (503 / 429)
+      const isOverload = verificationResults.some(
+        (r) => r.rejection_reason && (r.rejection_reason.includes('503') || r.rejection_reason.includes('429'))
+      );
 
-      publishedText += `\n\n> ⚠️ *Lưu ý kiểm chứng nguồn:* Một số luận điểm dưới đây chưa đủ căn cứ xác thực hoàn toàn từ tài liệu bài học:\n${warnings}`;
+      if (isOverload) {
+        publishedText += `\n\n> ℹ️ *Lưu ý kiểm chứng:* Hệ thống AI đang tạm thời quá tải kết nối đối chiếu ngữ nghĩa (503). Cô trò mình ưu tiên bám sát các câu trích dẫn nguyên văn từ tài liệu bài học ở trên nhé!`;
+      } else {
+        // Append cautionary notice for unverified sections (at most 3 key warnings)
+        const unverifiedItems = verificationResults.filter((r) => !r.is_verified);
+        const warnings = unverifiedItems
+          .slice(0, 3)
+          .map((u) => `- Chi tiết: "${u.claim.substring(0, 60)}..." (${u.rejection_reason || 'Chưa đủ căn cứ xác thực'})`)
+          .join('\n');
+
+        publishedText += `\n\n> ⚠️ *Lưu ý kiểm chứng nguồn:* Một số luận điểm dưới đây chưa đủ căn cứ xác thực hoàn toàn từ tài liệu bài học:\n${warnings}`;
+      }
     }
 
     const metrics: VerificationMetrics = {
