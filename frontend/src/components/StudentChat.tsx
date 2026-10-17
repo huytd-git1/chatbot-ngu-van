@@ -25,6 +25,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [openCitationIdx, setOpenCitationIdx] = useState<number | null>(null);
+  const [docSuggestions, setDocSuggestions] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -35,6 +36,27 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
       setSelectedWorkId(works[0].id);
     }
   }, [works, selectedWorkId]);
+
+  // Fetch auto-generated study suggestions directly from teacher reference documents
+  useEffect(() => {
+    if (!selectedWorkId) {
+      setDocSuggestions([]);
+      return;
+    }
+    let isMounted = true;
+    apiRequest<{ suggestions: string[] }>(`/api/student/works/${selectedWorkId}/suggestions`)
+      .then((res) => {
+        if (isMounted && res.suggestions && res.suggestions.length > 0) {
+          setDocSuggestions(res.suggestions);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setDocSuggestions([]);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedWorkId]);
 
   // Session-based chat storage key for active account and work
   const sessionKey = useMemo(() => {
@@ -76,9 +98,21 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   const activeWork = works.find(w => w.id === selectedWorkId);
 
   // Dynamic suggestions tailored to the active literary work & mode
-  const suggestions = useMemo(() => {
+  const baseSuggestions = useMemo(() => {
     return getWorkSuggestions(activeWork, learningMode);
   }, [activeWork, learningMode]);
+
+  // Contextual suggestions: Prioritize follow-up suggestions from latest AI citation/answer, then teacher doc suggestions, then base suggestions
+  const contextualSuggestions = useMemo(() => {
+    const lastAiMsg = [...messages].reverse().find(m => m.sender === 'ai' && m.suggestions && m.suggestions.length > 0);
+    if (lastAiMsg?.suggestions && lastAiMsg.suggestions.length > 0) {
+      return lastAiMsg.suggestions;
+    }
+    if (docSuggestions.length > 0) {
+      return docSuggestions;
+    }
+    return baseSuggestions;
+  }, [messages, docSuggestions, baseSuggestions]);
 
   const learningModeConfigs = [
     { id: 'qa', label: 'Hỏi đáp tác phẩm', shortLabel: 'Hỏi đáp', icon: HelpCircle, desc: 'Giải đáp thấu đáo dựa trên tài liệu' },
@@ -126,6 +160,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
       const res = await apiRequest<{
         answer: string;
         citations: Array<{ fileName: string; sourceText?: string }>;
+        suggestions?: string[];
         isNoSource: boolean;
         toolActuallyUsed: boolean;
         modelUsed?: string;
@@ -147,6 +182,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         sender: 'ai',
         text: res.answer,
         citations: res.citations || [],
+        suggestions: res.suggestions || [],
         isNoSource: res.isNoSource,
         toolActuallyUsed: res.toolActuallyUsed,
         modelUsed: res.modelUsed,
@@ -289,14 +325,36 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               Em đang cùng cô tìm hiểu tác phẩm <strong>"{activeWork?.title}"</strong> {activeWork?.author ? `của tác giả ${activeWork.author}` : ''}. Bấm vào câu hỏi gợi ý bên dưới hoặc tự gõ câu hỏi để bắt đầu nhé:
             </p>
 
+            {/* Direct Suggestions from Teacher Reference Documents */}
+            {docSuggestions.length > 0 && (
+              <div className="w-full max-w-xl mb-3">
+                <div className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wider mb-2 flex items-center justify-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                  Gợi ý trực tiếp từ tài liệu giáo viên đã cấp ({docSuggestions.length})
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
+                  {docSuggestions.map((s, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSend(s)}
+                      className="text-xs p-2.5 sm:p-3 rounded-xl bg-emerald-50/70 hover:bg-emerald-100 text-emerald-950 border border-emerald-200 transition-all hover:border-emerald-400 hover:shadow-xs flex items-start gap-2"
+                    >
+                      <span className="text-emerald-700 font-bold shrink-0">✦</span>
+                      <span className="line-clamp-2 leading-relaxed">{s}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Dynamic Quick Starters for Active Work */}
             <div className="w-full max-w-xl">
               <div className="text-[11px] font-semibold text-amber-900 uppercase tracking-wider mb-2 flex items-center justify-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                Gợi ý cho tác phẩm "{activeWork?.title || 'bài học'}"
+                Gợi ý trọng tâm bài học "{activeWork?.title || 'bài học'}"
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                {suggestions.map((s, idx) => (
+                {baseSuggestions.map((s, idx) => (
                   <button
                     key={idx}
                     onClick={() => handleSend(s)}
@@ -376,6 +434,28 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                   </div>
                 )}
 
+                {/* Dynamic Follow-up Suggestions directly from reference contents */}
+                {msg.sender === 'ai' && msg.suggestions && msg.suggestions.length > 0 && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-200/60">
+                    <div className="text-[11px] font-semibold text-[#0f2942] flex items-center gap-1.5 mb-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>Gợi ý hỏi tiếp trực tiếp từ dẫn chứng & tài liệu:</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {msg.suggestions.map((sug, sIdx) => (
+                        <button
+                          key={sIdx}
+                          onClick={() => handleSend(sug)}
+                          className="text-[11px] sm:text-xs text-left px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100/90 text-amber-950 border border-amber-200 hover:border-amber-400 transition-all shadow-2xs flex items-start gap-1.5"
+                        >
+                          <span className="text-amber-700 font-bold shrink-0">✦</span>
+                          <span>{sug}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* AI Model & Grounding Badges */}
                 {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
                   <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-1 text-[10px] sm:text-[11px]">
@@ -440,7 +520,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               <Sparkles className="w-3 h-3 text-amber-500" />
               Gợi ý:
             </span>
-            {suggestions.map((s, idx) => (
+            {contextualSuggestions.map((s, idx) => (
               <button
                 key={idx}
                 onClick={() => handleSend(s)}

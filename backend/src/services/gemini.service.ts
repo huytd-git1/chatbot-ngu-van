@@ -1113,4 +1113,58 @@ ${formattedHistory}
       toolActuallyUsed: true,
     };
   }
+
+  /**
+   * Generates interactive follow-up suggestions directly derived from the RAG citations and response text
+   */
+  static generateSuggestionsFromCitations(params: {
+    workTitle: string;
+    learningMode: string;
+    citations: FileCitationMeta[];
+    answerText?: string;
+  }): string[] {
+    const { workTitle, learningMode, citations, answerText = '' } = params;
+    const suggestions: string[] = [];
+
+    // Extract verbatim quotes in > "..."
+    const quotes = Array.from(answerText.matchAll(/>\s*"([^"]+)"/g))
+      .map((m) => m[1].trim())
+      .filter((q) => q.length >= 8);
+
+    // Extract quotes/snippets from citations
+    const sourceSnippets = citations
+      .map((c) => (c.sourceText || '').trim())
+      .filter((s) => s.length >= 10);
+
+    const keyPhrases = quotes.length > 0 ? quotes : sourceSnippets;
+
+    if (keyPhrases.length > 0) {
+      const q1 = keyPhrases[0];
+      const short1 = q1.length > 40 ? q1.substring(0, 40) + '...' : q1;
+      suggestions.push(`Phân tích sâu hơn chi tiết: "${short1}"`);
+    }
+
+    if (keyPhrases.length > 1) {
+      const q2 = keyPhrases[1];
+      const short2 = q2.length > 40 ? q2.substring(0, 40) + '...' : q2;
+      suggestions.push(`Ý nghĩa biểu tượng của chi tiết: "${short2}"`);
+    } else if (citations.length > 0 && citations[0].fileName) {
+      suggestions.push(`Nghệ thuật miêu tả đặc sắc trong tài liệu "${citations[0].fileName.slice(0, 35)}"`);
+    }
+
+    // Add mode-specific follow-up
+    if (learningMode === 'character_analysis') {
+      suggestions.push(`Nhận xét vẻ đẹp tâm hồn nhân vật qua các dẫn chứng vừa nêu`);
+    } else if (learningMode === 'outline') {
+      suggestions.push(`Gợi ý mở rộng các luận điểm thân bài từ những dẫn chứng trên`);
+    } else if (learningMode === 'reading_comprehension') {
+      suggestions.push(`Đặt câu hỏi đọc hiểu tiếp theo cho đoạn trích này`);
+    } else if (learningMode === 'essay_feedback') {
+      suggestions.push(`Cách đưa dẫn chứng trên vào đoạn văn nghị luận một cách tự nhiên`);
+    } else {
+      suggestions.push(`Thông điệp và giá trị nhân đạo tác giả gửi gắm qua chi tiết này là gì?`);
+    }
+
+    return Array.from(new Set(suggestions)).slice(0, 3);
+  }
 }

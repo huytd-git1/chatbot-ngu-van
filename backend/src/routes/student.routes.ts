@@ -17,6 +17,7 @@ const chatLimiter = rateLimit({
 studentRouter.use(authMiddleware(true));
 // Allow student, teacher_test and admin to access student RAG interface
 studentRouter.get('/works', StudentController.getAssignedWorks);
+studentRouter.get('/works/:workId/suggestions', StudentController.getWorkSuggestions);
 studentRouter.get('/quota', StudentController.getQuota);
 studentRouter.post('/ask', chatLimiter, StudentController.askQuestion);
 studentRouter.get('/history', StudentController.getHistory);

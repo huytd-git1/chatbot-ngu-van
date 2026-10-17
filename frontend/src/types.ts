@@ -78,6 +78,7 @@ export interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
   citations?: FileCitation[];
+  suggestions?: string[];
   isNoSource?: boolean;
   toolActuallyUsed?: boolean;
   modelUsed?: string;

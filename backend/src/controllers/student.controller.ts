@@ -257,9 +257,18 @@ export class StudentController {
         ragResult.tokenCount
       );
 
+      // Generate follow-up suggestions directly derived from the citations and answer
+      const suggestions = GeminiService.generateSuggestionsFromCitations({
+        workTitle: work.title,
+        learningMode,
+        citations: ragResult.citations,
+        answerText: ragResult.text,
+      });
+
       res.status(200).json({
         answer: ragResult.text,
         citations: ragResult.citations,
+        suggestions,
         isNoSource: false,
         toolConfigured: ragResult.toolConfigured,
         toolActuallyUsed: ragResult.toolActuallyUsed,
@@ -272,6 +281,106 @@ export class StudentController {
       await QuotaService.recordFailure(req.user.id, idempotencyKey, err.message || 'Lỗi xử lý câu hỏi');
       res.status(500).json({ error: 'Đã xảy ra lỗi khi kết nối với AI. Lượt hỏi của em đã được bảo lưu nguyên vẹn, vui lòng thử lại sau.' });
     }
+  }
+
+  /**
+   * Generates smart suggestions directly extracted from the teacher's uploaded reference materials
+   */
+  static async getWorkSuggestions(req: Request, res: Response): Promise<void> {
+    if (!req.user) {
+      res.status(401).json({ error: 'Chưa đăng nhập.' });
+      return;
+    }
+
+    const { workId } = req.params;
+
+    // 1. Check access
+    const workRes = await query<{ id: string; title: string; author: string }>(
+      `SELECT id, title, author FROM works WHERE id = $1 AND status = 'active'`,
+      [workId]
+    );
+    if (workRes.rows.length === 0) {
+      res.status(404).json({ error: 'Tác phẩm không tồn tại.' });
+      return;
+    }
+    const work = workRes.rows[0];
+
+    // 2. Fetch all ready documents
+    const docsRes = await query<{ title: string; doc_type: string; raw_content: string | null }>(
+      `SELECT title, doc_type, raw_content FROM documents WHERE work_id = $1 AND status = 'ready'`,
+      [workId]
+    );
+
+    // 3. Check learning settings questions
+    let learningQuestions: string[] = [];
+    if (req.user.role === 'student') {
+      const studentRes = await query<{ class_id: string }>(
+        `SELECT class_id FROM students WHERE user_id = $1`,
+        [req.user.id]
+      );
+      if (studentRes.rows.length > 0) {
+        const classId = studentRes.rows[0].class_id;
+        const lsRes = await query<{ prep_questions: string; review_questions: string }>(
+          `SELECT prep_questions, review_questions FROM learning_settings WHERE class_id = $1 AND work_id = $2`,
+          [classId, workId]
+        );
+        if (lsRes.rows.length > 0) {
+          const row = lsRes.rows[0];
+          if (row.prep_questions) {
+            learningQuestions.push(...row.prep_questions.split('\n').map((q) => q.trim()).filter((q) => q.length > 10));
+          }
+          if (row.review_questions) {
+            learningQuestions.push(...row.review_questions.split('\n').map((q) => q.trim()).filter((q) => q.length > 10));
+          }
+        }
+      }
+    }
+
+    const generatedSuggestions: string[] = [];
+
+    // Prioritize explicit teacher learning questions
+    for (const q of learningQuestions) {
+      if (generatedSuggestions.length >= 4) break;
+      const cleanQ = q.replace(/^[-*•0-9.)\s]+/, '').trim();
+      if (cleanQ.length >= 12 && !generatedSuggestions.includes(cleanQ)) {
+        generatedSuggestions.push(cleanQ);
+      }
+    }
+
+    // Extract questions and section headers from uploaded documents
+    for (const doc of docsRes.rows) {
+      if (!doc.raw_content) continue;
+      const lines = doc.raw_content.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+
+      for (const line of lines) {
+        if (generatedSuggestions.length >= 6) break;
+
+        // Pattern A: Line ending with '?' (Question in teacher document)
+        if (line.endsWith('?') && line.length >= 15 && line.length <= 120) {
+          const cleanLine = line.replace(/^[0-9A-Za-z.)\-*•\s]+/, '').trim();
+          if (cleanLine.length >= 12 && !generatedSuggestions.includes(cleanLine)) {
+            generatedSuggestions.push(cleanLine);
+            continue;
+          }
+        }
+
+        // Pattern B: Main headings/sections like '1. Luận điểm...', 'I. Phân tích...', 'II. Giá trị...'
+        const headingMatch = line.match(/^(?:I|II|III|IV|V|1|2|3|4|5|A|B|C|Luận điểm \d+)[.:\s]+(.{15,90})$/i);
+        if (headingMatch) {
+          const topic = headingMatch[1].trim();
+          const q = `Phân tích nội dung: "${topic}"`;
+          if (!generatedSuggestions.includes(q)) {
+            generatedSuggestions.push(q);
+          }
+        }
+      }
+    }
+
+    res.status(200).json({
+      workTitle: work.title,
+      suggestions: generatedSuggestions,
+      hasDocumentSuggestions: generatedSuggestions.length > 0,
+    });
   }
 
   /**
