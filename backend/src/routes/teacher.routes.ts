@@ -37,6 +37,10 @@ teacherRouter.post('/works', TeacherController.createWork);
 teacherRouter.put('/works/:workId/classes', TeacherController.updateWorkClasses);
 teacherRouter.get('/works/:workId/documents', TeacherController.getDocumentsForWork);
 teacherRouter.post('/works/:workId/documents', upload.single('file'), TeacherController.uploadDocument);
+teacherRouter.put('/documents/:documentId/activate-primary', TeacherController.activatePrimaryDocument);
+teacherRouter.put('/documents/:documentId/classification', TeacherController.updateDocumentClassification);
+teacherRouter.get('/documents/:documentId/paragraphs', TeacherController.getDocumentParagraphs);
+teacherRouter.get('/works/:workId/document-diff-report', TeacherController.getDocumentDiffReport);
 teacherRouter.delete('/documents/:documentId', TeacherController.deleteDocument);
 
 // Learning settings

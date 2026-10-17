@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   Download, RefreshCw, Lock, Unlock,
-  KeyRound, Shield, FileText, CheckCircle2, AlertCircle, Trash2, Award, Calendar
+  KeyRound, Shield, FileText, CheckCircle2, AlertCircle, Trash2, Award, Calendar,
+  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info
 } from 'lucide-react';
-import type { ClassItem, StudentItem, Work, DocumentItem } from '../types.js';
+import type { ClassItem, StudentItem, Work, DocumentItem, ParagraphItem, DocumentDiffReport } from '../types.js';
 import { apiRequest } from '../api/client.js';
 
 export const TeacherDashboard: React.FC = () => {
@@ -38,11 +39,22 @@ export const TeacherDashboard: React.FC = () => {
   const [newWorkGrade, setNewWorkGrade] = useState(9);
   const [newWorkDesc, setNewWorkDesc] = useState('');
 
-  // Doc upload
+  // Doc upload & classification
   const [docTitle, setDocTitle] = useState('');
-  const [docType, setDocType] = useState<'text_primary' | 'analysis' | 'lesson_plan' | 'qa_guide'>('analysis');
+  const [docRole, setDocRole] = useState<'primary' | 'reference' | 'unclassified'>('reference');
+  const [refType, setRefType] = useState<'analysis' | 'lesson_plan' | 'context' | 'qa_guide' | 'other'>('analysis');
   const [docFile, setDocFile] = useState<File | null>(null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+
+  // Modals for OCR Paragraphs & Diff Report
+  const [previewParagraphs, setPreviewParagraphs] = useState<ParagraphItem[]>([]);
+  const [loadingParagraphs, setLoadingParagraphs] = useState(false);
+  const [showParagraphsModal, setShowParagraphsModal] = useState(false);
+  const [selectedDocForParagraphs, setSelectedDocForParagraphs] = useState<DocumentItem | null>(null);
+
+  const [diffReport, setDiffReport] = useState<DocumentDiffReport | null>(null);
+  const [loadingDiffReport, setLoadingDiffReport] = useState(false);
+  const [showDiffModal, setShowDiffModal] = useState(false);
 
   // TOTP 2FA
   const [totpQr, setTotpQr] = useState<string | null>(null);
@@ -277,7 +289,11 @@ export const TeacherDashboard: React.FC = () => {
     try {
       const formData = new FormData();
       formData.append('title', docTitle);
-      formData.append('docType', docType);
+      formData.append('docType', docRole === 'primary' ? 'text_primary' : refType);
+      formData.append('documentRole', docRole);
+      if (docRole === 'reference') {
+        formData.append('referenceType', refType);
+      }
       formData.append('file', docFile);
 
       const res = await apiRequest(`/api/teacher/works/${selectedWorkId}/documents`, {
@@ -292,6 +308,68 @@ export const TeacherDashboard: React.FC = () => {
       alert(err.message);
     } finally {
       setIsUploadingDoc(false);
+    }
+  };
+
+  const handleActivatePrimary = async (docId: string, docTitleText: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn kích hoạt tài liệu "${docTitleText}" làm BẢN GỐC TÁC PHẨM CÓ HIỆU LỰC?\n\n- Bản gốc cũ (nếu có) sẽ được chuyển về lưu trữ.\n- Trích xuất đoạn và trang sẽ được cập nhật.\n- Mọi trích dẫn nguyên văn cho học sinh sẽ được đối chiếu theo bản này.`)) {
+      return;
+    }
+    try {
+      const res = await apiRequest(`/api/teacher/documents/${docId}/activate-primary`, {
+        method: 'PUT',
+      });
+      alert(res.message);
+      if (selectedWorkId) {
+        loadDocuments(selectedWorkId);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleUpdateClassification = async (docId: string, role: 'primary' | 'reference' | 'unclassified', refTypeVal?: string) => {
+    try {
+      const res = await apiRequest(`/api/teacher/documents/${docId}/classification`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          documentRole: role,
+          referenceType: refTypeVal || 'analysis',
+        }),
+      });
+      alert(res.message);
+      if (selectedWorkId) {
+        loadDocuments(selectedWorkId);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleViewParagraphs = async (doc: DocumentItem) => {
+    setSelectedDocForParagraphs(doc);
+    setShowParagraphsModal(true);
+    setLoadingParagraphs(true);
+    try {
+      const res = await apiRequest<{ paragraphs: ParagraphItem[]; count: number }>(`/api/teacher/documents/${doc.id}/paragraphs`);
+      setPreviewParagraphs(res.paragraphs || []);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoadingParagraphs(false);
+    }
+  };
+
+  const handleViewDiffReport = async (wId: string) => {
+    setShowDiffModal(true);
+    setLoadingDiffReport(true);
+    try {
+      const res = await apiRequest<DocumentDiffReport>(`/api/teacher/works/${wId}/document-diff-report`);
+      setDiffReport(res);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoadingDiffReport(false);
     }
   };
 
@@ -747,105 +825,337 @@ export const TeacherDashboard: React.FC = () => {
           </div>
 
           {/* Document list & upload */}
-          <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#0f2942]">
-                Tài liệu RAG: {works.find((w) => w.id === selectedWorkId)?.title || 'Chưa chọn'}
-              </h3>
-              <button
-                onClick={() => selectedWorkId && loadDocuments(selectedWorkId)}
-                title="Làm mới trạng thái lập chỉ mục"
-                className="p-1 rounded text-slate-500 hover:text-slate-800"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
+          <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold text-[#0f2942]">
+                  Tài liệu & Bản gốc: {works.find((w) => w.id === selectedWorkId)?.title || 'Chưa chọn'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Phân loại nguồn và kiểm chứng trích dẫn: 1 Bản gốc duy nhất + Nhiều tài liệu tham khảo
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedWorkId && (
+                  <button
+                    onClick={() => handleViewDiffReport(selectedWorkId)}
+                    title="Báo cáo đối chiếu mâu thuẫn giữa tài liệu tham khảo và bản gốc"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <GitCompare className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Đối chiếu tài liệu</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => selectedWorkId && loadDocuments(selectedWorkId)}
+                  title="Làm mới trạng thái"
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            {/* Upload form */}
+            {/* Upload form with Role & Subtype Selection */}
             <form onSubmit={handleUploadDoc} className="p-3.5 rounded-xl bg-[#fbf9f4] border border-[#e8e2d5] space-y-2.5">
-              <span className="text-xs font-semibold text-[#0f2942]">Tải tài liệu vào Gemini File Search Store:</span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <span className="text-xs font-semibold text-[#0f2942]">Tải tài liệu mới & phân loại vai trò:</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input
                   type="text"
                   placeholder="Tiêu đề tài liệu"
                   value={docTitle}
                   onChange={(e) => setDocTitle(e.target.value)}
-                  className="text-xs p-2 rounded-lg border border-[#e8e2d5] bg-white"
+                  className="text-xs p-2 rounded-lg border border-[#e8e2d5] bg-white sm:col-span-1"
                 />
                 <select
-                  value={docType}
-                  onChange={(e) => setDocType(e.target.value as any)}
-                  className="text-xs p-2 rounded-lg border border-[#e8e2d5] bg-white"
+                  value={docRole}
+                  onChange={(e) => setDocRole(e.target.value as any)}
+                  className="text-xs p-2 rounded-lg border border-[#e8e2d5] bg-white font-medium"
                 >
-                  <option value="analysis">Tài liệu phân tích chuyên sâu</option>
-                  <option value="text_primary">Văn bản tác phẩm</option>
-                  <option value="lesson_plan">Giáo án giảng dạy</option>
-                  <option value="qa_guide">Câu hỏi và hướng dẫn trả lời</option>
+                  <option value="reference">Tài liệu tham khảo / Phân tích</option>
+                  <option value="primary">Đề xuất văn bản tác phẩm gốc (chờ duyệt)</option>
+                  <option value="unclassified">Chưa phân loại (chờ xử lý, không vào RAG)</option>
                 </select>
+                {docRole === 'reference' ? (
+                  <select
+                    value={refType}
+                    onChange={(e) => setRefType(e.target.value as any)}
+                    className="text-xs p-2 rounded-lg border border-[#e8e2d5] bg-white"
+                  >
+                    <option value="analysis">Phân tích chuyên sâu</option>
+                    <option value="lesson_plan">Giáo án giảng dạy</option>
+                    <option value="context">Bối cảnh lịch sử / Tác giả</option>
+                    <option value="qa_guide">Câu hỏi và hướng dẫn trả lời</option>
+                    <option value="other">Tài liệu tham khảo khác</option>
+                  </select>
+                ) : (
+                  <div className="text-[11px] text-slate-500 flex items-center px-2 bg-slate-50 rounded-lg border border-slate-200">
+                    {docRole === 'primary' ? 'Yêu cầu duyệt trước khi kích hoạt' : 'Không dùng cho câu hỏi học sinh'}
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 <input
                   type="file"
                   accept=".txt,.md,.pdf,.docx,.csv"
                   onChange={(e) => setDocFile(e.target.files?.[0] || null)}
-                  className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-900"
+                  className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-900 cursor-pointer"
                 />
                 <button
                   type="submit"
                   disabled={isUploadingDoc || !docFile || !docTitle.trim()}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 shrink-0"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 shrink-0 shadow-2xs cursor-pointer ml-auto"
                 >
-                  {isUploadingDoc ? 'Đang tải & Lập chỉ mục...' : 'Tải lên & Lập chỉ mục RAG'}
+                  {isUploadingDoc ? 'Đang tải & Lập chỉ mục...' : 'Tải lên & Lưu kho'}
                 </button>
               </div>
             </form>
 
-            {/* Document list */}
-            <div className="space-y-2">
-              {documents.map((d) => (
-                <div
-                  key={d.id}
-                  className="p-3 rounded-xl border border-[#e8e2d5] flex items-center justify-between text-xs hover:bg-slate-50/50"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-slate-500" />
-                      <span className="font-bold text-[#0f2942]">{d.title}</span>
-                      <span className="text-[10px] px-2 py-0.2 rounded-full bg-slate-100 text-slate-600">
-                        {d.doc_type === 'analysis' ? 'Phân tích' : d.doc_type === 'text_primary' ? 'Văn bản gốc' : d.doc_type === 'lesson_plan' ? 'Giáo án' : 'Câu hỏi & đáp'}
+            {/* Document Categorization into 3 Sections */}
+            {(() => {
+              const activePrimary = documents.find((d) => d.document_role === 'primary' && d.is_active);
+              const inactivePrimaries = documents.filter((d) => d.document_role === 'primary' && !d.is_active);
+              const referenceDocs = documents.filter((d) => d.document_role === 'reference');
+              const unclassifiedDocs = documents.filter((d) => d.document_role === 'unclassified');
+
+              return (
+                <div className="space-y-5">
+                  {/* Warning banner if NO active primary document */}
+                  {!activePrimary && (
+                    <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-start gap-2.5 shadow-2xs">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold block text-amber-900">Chưa có văn bản tác phẩm gốc được kích hoạt</span>
+                        <p className="mt-0.5 text-amber-800 leading-relaxed">
+                          Hệ thống yêu cầu mỗi tác phẩm phải có đúng 1 văn bản gốc đang hoạt động. Chế độ hỏi đáp có trích dẫn tác phẩm sẽ tạm khóa cho học sinh cho đến khi giáo viên phê duyệt và kích hoạt văn bản gốc.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SECTION 1: VĂN BẢN TÁC PHẨM GỐC */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                      <h4 className="text-xs font-bold text-[#0f2942] uppercase tracking-wider flex items-center gap-1.5">
+                        <Star className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
+                        1. Văn bản tác phẩm gốc (Đang có hiệu lực)
+                      </h4>
+                      <span className="text-[11px] text-slate-500">Tối đa đúng 1 bản đang kích hoạt</span>
+                    </div>
+
+                    {activePrimary ? (
+                      <div className="p-3.5 rounded-xl bg-emerald-50/70 border-2 border-emerald-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-emerald-700" />
+                            <span className="font-bold text-emerald-950 text-sm">{activePrimary.title}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                              Phiên bản v{activePrimary.version}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-white text-emerald-800 text-[10px] font-semibold border border-emerald-200">
+                              {activePrimary.ocr_status === 'review_needed' ? '⚠️ PDF Scan (Cần kiểm tra OCR)' : '✓ Văn bản đã trích xuất đoạn'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600">
+                            {activePrimary.file_name} • {(activePrimary.file_size_bytes / 1024).toFixed(1)} KB • {activePrimary.reviewed_at ? `Duyệt bởi: ${activePrimary.reviewer_name || 'Giáo viên'}` : 'Chưa ghi nhận người duyệt'}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleViewParagraphs(activePrimary)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 text-[11px] font-semibold hover:bg-emerald-100 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Xem các đoạn (OCR)</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteDoc(activePrimary.id)}
+                            title="Xóa bản gốc"
+                            className="p-1.5 rounded-lg hover:bg-red-100 text-red-600 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 py-3 italic bg-[#fbf9f4] p-3 rounded-xl border border-dashed border-[#e8e2d5] text-center">
+                        Chưa có bản gốc nào được kích hoạt. Hãy chọn một tài liệu bên dưới để "Đặt làm bản gốc".
+                      </p>
+                    )}
+
+                    {/* Candidate / Archival Primaries */}
+                    {inactivePrimaries.length > 0 && (
+                      <div className="mt-2 space-y-1.5 pl-3 border-l-2 border-slate-200">
+                        <span className="text-[11px] font-semibold text-slate-500">Các bản gốc lưu trữ / chờ kích hoạt:</span>
+                        {inactivePrimaries.map((p) => (
+                          <div key={p.id} className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                            <span className="text-slate-700 truncate">{p.title} (v{p.version})</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={() => handleViewParagraphs(p)}
+                                className="text-[11px] text-slate-600 hover:text-slate-900 underline cursor-pointer"
+                              >
+                                Xem đoạn
+                              </button>
+                              <button
+                                onClick={() => handleActivatePrimary(p.id, p.title)}
+                                className="px-2 py-1 rounded bg-[#0f2942] text-white text-[11px] font-semibold hover:bg-[#1e3a5f] cursor-pointer"
+                              >
+                                Kích hoạt thay thế
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDoc(p.id)}
+                                className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* SECTION 2: TÀI LIỆU THAM KHẢO & PHÂN TÍCH */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                      <h4 className="text-xs font-bold text-[#0f2942] uppercase tracking-wider flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        2. Tài liệu tham khảo, phân tích, giáo án ({referenceDocs.length})
+                      </h4>
+                      <span className="text-[11px] text-slate-500">Bổ sung lập luận & nghệ thuật</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {referenceDocs.map((d) => (
+                        <div
+                          key={d.id}
+                          className="p-3 rounded-xl border border-[#e8e2d5] bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-slate-50/50 shadow-2xs"
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-slate-500" />
+                              <span className="font-bold text-[#0f2942]">{d.title}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 font-semibold">
+                                {d.reference_type === 'lesson_plan'
+                                  ? 'Giáo án'
+                                  : d.reference_type === 'context'
+                                  ? 'Bối cảnh'
+                                  : d.reference_type === 'qa_guide'
+                                  ? 'Câu hỏi & đáp'
+                                  : 'Phân tích'}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-400 block">
+                              {d.file_name} • {(d.file_size_bytes / 1024).toFixed(1)} KB • v{d.version}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => handleViewParagraphs(d)}
+                              title="Xem các đoạn trích xuất"
+                              className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium cursor-pointer"
+                            >
+                              Xem đoạn
+                            </button>
+                            <button
+                              onClick={() => handleActivatePrimary(d.id, d.title)}
+                              title="Đặt làm văn bản gốc có hiệu lực"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-2xs"
+                            >
+                              <Star className="w-3 h-3" />
+                              <span>Đặt làm bản gốc</span>
+                            </button>
+                            <button
+                              onClick={() => handleUpdateClassification(d.id, 'unclassified')}
+                              title="Chuyển về danh sách chưa phân loại"
+                              className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                            >
+                              Hủy duyệt
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDoc(d.id)}
+                              title="Xóa tài liệu"
+                              className="p-1 rounded hover:bg-red-50 text-red-600 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {referenceDocs.length === 0 && (
+                        <p className="text-xs text-slate-400 py-3 italic bg-[#fbf9f4] p-3 rounded-xl border border-[#e8e2d5] text-center">
+                          Chưa có tài liệu tham khảo nào cho tác phẩm này.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* SECTION 3: TÀI LIỆU CHƯA PHÂN LOẠI */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                      <h4 className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                        3. Tài liệu chưa phân loại ({unclassifiedDocs.length})
+                      </h4>
+                      <span className="text-[10px] text-red-600 font-semibold bg-red-50 px-2 py-0.5 rounded border border-red-200">
+                        Chờ giáo viên duyệt • Không đưa vào RAG
                       </span>
                     </div>
-                    <span className="text-[11px] text-slate-400">
-                      {d.file_name} • {(d.file_size_bytes / 1024).toFixed(1)} KB • Gemini Store: {d.file_search_store_name.split('/').pop()}
-                    </span>
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                      d.status === 'ready'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : d.status === 'indexing'
-                        ? 'bg-amber-100 text-amber-800 animate-pulse'
-                        : 'bg-red-100 text-red-800'
-                    }`}>
-                      {d.status === 'ready' ? 'Sẵn sàng RAG' : d.status === 'indexing' ? 'Đang index...' : 'Lỗi'}
-                    </span>
+                    <div className="space-y-1.5">
+                      {unclassifiedDocs.map((d) => (
+                        <div
+                          key={d.id}
+                          className="p-3 rounded-xl border border-amber-200 bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs shadow-2xs"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900">{d.title}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+                                Chưa phân loại
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 block mt-0.5">
+                              {d.file_name} • {(d.file_size_bytes / 1024).toFixed(1)} KB
+                            </span>
+                          </div>
 
-                    <button
-                      onClick={() => handleDeleteDoc(d.id)}
-                      title="Xóa tài liệu"
-                      className="p-1 rounded hover:bg-red-50 text-red-600"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => handleUpdateClassification(d.id, 'reference', 'analysis')}
+                              className="px-2.5 py-1 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-[11px] font-semibold cursor-pointer shadow-2xs"
+                            >
+                              Duyệt làm Tham khảo
+                            </button>
+                            <button
+                              onClick={() => handleActivatePrimary(d.id, d.title)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-semibold cursor-pointer shadow-2xs"
+                            >
+                              Kích hoạt làm Bản gốc
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDoc(d.id)}
+                              className="p-1 rounded hover:bg-red-50 text-red-600 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {unclassifiedDocs.length === 0 && (
+                        <p className="text-xs text-slate-400 py-2.5 italic text-center">
+                          Không có tài liệu nào chờ phân loại.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))}
-              {documents.length === 0 && (
-                <p className="text-sm text-slate-400 py-6 text-center">Chưa có tài liệu nào cho tác phẩm này.</p>
-              )}
-            </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -910,6 +1220,197 @@ export const TeacherDashboard: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODAL 1: XEM CÁC ĐOẠN TRÍCH XUẤT (OCR & SỐ TRANG) */}
+      {showParagraphsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="max-w-3xl w-full max-h-[85vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[#e8e2d5]">
+            <div className="p-4 border-b border-[#e8e2d5] flex items-center justify-between bg-[#fbf9f4]">
+              <div>
+                <h3 className="text-base font-bold text-[#0f2942] flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-emerald-700" />
+                  Đoạn văn bản trích xuất: {selectedDocForParagraphs?.title}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Phiên bản v{selectedDocForParagraphs?.version} • {previewParagraphs.length} đoạn đã được chia và lưu trữ
+                </p>
+              </div>
+              <button
+                onClick={() => setShowParagraphsModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto space-y-3">
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+                <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Kiểm tra OCR & Trang:</strong> Giáo viên có thể xem trước nội dung trích xuất để phát hiện lỗi scan, mất dấu tiếng Việt hoặc thiếu trang. Số trang chỉ hiển thị nếu tài liệu gốc có đánh dấu trang rõ ràng, hệ thống không tự tạo số trang giả.
+                </p>
+              </div>
+
+              {loadingParagraphs ? (
+                <div className="py-12 text-center text-xs text-slate-500">Đang tải các đoạn trích xuất...</div>
+              ) : previewParagraphs.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400 italic">
+                  Chưa có đoạn nào được trích xuất cho tài liệu này (hoặc tài liệu chưa được kích hoạt).
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {previewParagraphs.map((p) => (
+                    <div key={p.id} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-colors space-y-1.5 text-xs shadow-2xs">
+                      <div className="flex items-center justify-between font-bold text-[#0f2942]">
+                        <span className="text-[11px] text-slate-500">Đoạn #{p.paragraph_order}</span>
+                        {p.page_number ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold border border-emerald-300">
+                            Trang {p.page_number}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-normal">
+                            Văn bản số (không phân trang)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-slate-800 leading-relaxed font-serif whitespace-pre-wrap">
+                        {p.content}
+                      </p>
+                      <details className="pt-1 border-t border-slate-100 text-[11px] text-slate-500 cursor-pointer">
+                        <summary className="hover:text-slate-800 select-none">Xem bản chuẩn hóa dùng cho so khớp trích dẫn</summary>
+                        <p className="mt-1 p-2 bg-slate-50 rounded border border-slate-200 font-mono text-[10px] text-slate-600 break-words">
+                          {p.normalized_content}
+                        </p>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 border-t border-[#e8e2d5] bg-[#fbf9f4] flex justify-end">
+              <button
+                onClick={() => setShowParagraphsModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#0f2942] text-white hover:bg-[#1e3a5f] cursor-pointer"
+              >
+                Đóng cửa sổ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: BÁO CÁO ĐỐI CHIẾU MÂU THUẪN TÀI LIỆU (DIFF REPORT) */}
+      {showDiffModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="max-w-4xl w-full max-h-[85vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[#e8e2d5]">
+            <div className="p-4 border-b border-[#e8e2d5] flex items-center justify-between bg-[#fbf9f4]">
+              <div>
+                <h3 className="text-base font-bold text-[#0f2942] flex items-center gap-2">
+                  <GitCompare className="w-4 h-4 text-amber-700" />
+                  Báo cáo đối chiếu mâu thuẫn tài liệu RAG
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Tác phẩm: {works.find((w) => w.id === selectedWorkId)?.title || ''} • So sánh các câu trích trong tài liệu tham khảo với bản gốc
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDiffModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto space-y-4 text-xs">
+              {/* Summary card */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[11px] text-slate-500 font-semibold uppercase block">Bản gốc đang hiệu lực</span>
+                  <span className="text-sm font-bold text-slate-800 mt-0.5 block truncate">
+                    {diffReport?.primaryDoc?.title || 'Chưa có bản gốc'}
+                  </span>
+                  <span className="text-[11px] text-emerald-700">
+                    {diffReport?.primaryDoc ? `v${diffReport.primaryDoc.version} (${diffReport.primaryDoc.paragraphCount} đoạn)` : 'N/A'}
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[11px] text-slate-500 font-semibold uppercase block">Tài liệu tham khảo rà soát</span>
+                  <span className="text-sm font-bold text-slate-800 mt-0.5 block">
+                    {diffReport?.referenceDocsCount ?? 0} tài liệu
+                  </span>
+                  <span className="text-[11px] text-slate-500">Giáo án & bài phân tích</span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[11px] text-slate-500 font-semibold uppercase block">Điểm cần lưu ý / Khác biệt</span>
+                  <span className={`text-sm font-bold mt-0.5 block ${(diffReport?.discrepanciesCount ?? 0) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    {diffReport?.discrepanciesCount ?? 0} trường hợp
+                  </span>
+                  <span className="text-[11px] text-slate-500">Trích dẫn trong tham khảo</span>
+                </div>
+              </div>
+
+              {/* Core Principle Alert */}
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 text-xs flex items-start gap-2">
+                <Info className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Nguyên tắc cốt lõi:</strong> Khi tài liệu tham khảo chép một câu khác với bản gốc đang chọn, hệ thống <strong>luôn ưu tiên bản gốc</strong> cho câu trích nguyên văn của học sinh và không âm thầm sửa bản gốc theo tài liệu tham khảo.
+                </p>
+              </div>
+
+              {loadingDiffReport ? (
+                <div className="py-12 text-center text-xs text-slate-500">Đang tạo báo cáo đối chiếu...</div>
+              ) : !diffReport?.items || diffReport.items.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400 italic">
+                  Không tìm thấy trích đoạn mâu thuẫn nào giữa tài liệu tham khảo và bản gốc.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <span className="font-bold text-slate-800 text-xs block">Chi tiết các câu trích xuất hiện trong tài liệu tham khảo:</span>
+                  {diffReport.items.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-xl border text-xs space-y-1.5 shadow-2xs ${
+                        item.foundInPrimary ? 'bg-white border-slate-200' : 'bg-amber-50/60 border-amber-300'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-1">
+                        <span className="font-semibold text-slate-700">Nguồn: {item.referenceDocTitle}</span>
+                        {item.foundInPrimary ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                            ✓ Khớp bản gốc (Đoạn #{item.matchedParagraphOrder})
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-bold border border-amber-300">
+                            ⚠️ Câu trong tham khảo không khớp bản gốc
+                          </span>
+                        )}
+                      </div>
+
+                      <blockquote className="italic font-serif pl-2 border-l-2 border-slate-300 text-slate-800 bg-slate-50/50 p-1 rounded">
+                        "{item.quoteCandidate}"
+                      </blockquote>
+
+                      <p className="text-[11px] text-slate-600">
+                        <strong>Ghi chú xử lý:</strong> {item.notes}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 border-t border-[#e8e2d5] bg-[#fbf9f4] flex justify-end">
+              <button
+                onClick={() => setShowDiffModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#0f2942] text-white hover:bg-[#1e3a5f] cursor-pointer"
+              >
+                Đóng báo cáo
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

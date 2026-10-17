@@ -1,6 +1,7 @@
 import { query } from './pool.js';
 import { runMigrations } from './migrate.js';
 import { AuthService } from '../services/auth.service.js';
+import { ParagraphService } from '../services/paragraph.service.js';
 
 export async function seedDatabase() {
   await runMigrations();
@@ -112,9 +113,55 @@ Tác giả: Nguyễn Thành Long | Biên soạn: Cô Dương
 - Luận điểm 2: Vẻ đẹp tâm hồn trong sáng, nếp sống văn minh và sự ấm áp tình người.
 `;
 
+  // 7. Seed Primary Original Text Document (Văn bản tác phẩm gốc)
+  const primaryDocText = `VĂN BẢN TÁC PHẨM GỐC: LẶNG LẼ SA PA
+Tác giả: Nguyễn Thành Long
+
+[Trang 1]
+Bác lái xe bóp còi một hồi dài rồi dừng xe lại bên đường. Bác quay lại bảo với ông họa sĩ và cô kĩ sư:
+- Tôi sắp giới thiệu với bác một người cô độc nhất thế gian. Thế nào bác cũng thích vẽ hắn.
+Chiếc xe dừng lại trước một trạm khí tượng trên đỉnh Yên Sơn cao hai nghìn sáu trăm mét. Một chàng trai tầm hai mươi bảy tuổi, tầm vóc nhỏ bé, nét mặt rạng rỡ từ trong nhà chạy ra.
+
+[Trang 2]
+Anh thanh niên niềm nở đón khách và sôi nổi kể về công việc của mình:
+- Khi ta làm việc, ta với công việc là đôi, sao gọi là một mình được? Huống chi việc của cháu gắn liền với việc của bao anh em, đồng chí dưới kia. Gian khổ nhất là lần ghi và báo về lúc một giờ sáng. Nửa đêm đang nằm trong chăn, nghe chuông đồng hồ reo, chỉ muốn trùm chăn ngủ tiếp. Nhưng nghĩ đến nhiệm vụ phục vụ sản xuất, phục vụ chiến đấu thì lại vùng dậy xách đèn ra vườn khí tượng.
+
+[Trang 3]
+Khi ông họa sĩ ngỏ ý muốn vẽ chân dung anh, anh thanh niên bối rối từ chối và giới thiệu những người khác đáng vẽ hơn:
+- Không, bác đừng vẽ cháu! Để cháu giới thiệu với bác những người khác xứng đáng hơn nhiều. Bác hãy vẽ ông kĩ sư ở vườn rau Sa Pa, ngày này qua ngày khác ngồi rình xem con ong thụ phấn cho hoa su hào ra sao để nâng cao năng suất giống. Hay bác hãy vẽ đồng chí cán bộ nghiên cứu bản đồ sét, mười một năm không rời cơ quan, luôn túc trực nửa đêm trèo lên cột thu lôi để tìm quy luật của sét giúp ích cho đất nước.`;
+
+  const primaryDocRes = await query<{ id: string }>(
+    `INSERT INTO documents (
+       work_id, title, doc_type, document_role, reference_type, is_active, ocr_status,
+       file_name, file_search_store_name, file_size_bytes, mime_type, status, version, raw_content, created_by
+     )
+     VALUES (
+       $1, 'Văn bản tác phẩm: Lặng lẽ Sa Pa (Nguyên tác)', 'text_primary', 'primary', null, true, 'none',
+       'van_ban_goc_lang_le_sa_pa.txt', 'fileSearchStores/work_lang_le_sa_pa', $2, 'text/plain', 'ready', 1, $3, $4
+     )
+     RETURNING id`,
+    [workId, Buffer.byteLength(primaryDocText), primaryDocText, teacherId]
+  );
+  const primaryDocId = primaryDocRes.rows[0].id;
+
+  // Extract paragraphs for primary text
+  await ParagraphService.extractAndSaveParagraphs({
+    documentId: primaryDocId,
+    workId,
+    version: 1,
+    rawText: primaryDocText,
+  });
+
+  // Reference Document
   await query(
-    `INSERT INTO documents (work_id, title, doc_type, file_name, file_search_store_name, file_size_bytes, mime_type, status, raw_content, created_by)
-     VALUES ($1, 'Tài liệu hướng dẫn đọc hiểu Lặng lẽ Sa Pa', 'analysis', 'tai_lieu_lang_le_sa_pa.txt', 'fileSearchStores/work_lang_le_sa_pa', $2, 'text/plain', 'ready', $3, $4)`,
+    `INSERT INTO documents (
+       work_id, title, doc_type, document_role, reference_type, is_active, ocr_status,
+       file_name, file_search_store_name, file_size_bytes, mime_type, status, version, raw_content, created_by
+     )
+     VALUES (
+       $1, 'Tài liệu hướng dẫn đọc hiểu Lặng lẽ Sa Pa', 'analysis', 'reference', 'analysis', true, 'none',
+       'tai_lieu_lang_le_sa_pa.txt', 'fileSearchStores/work_lang_le_sa_pa', $2, 'text/plain', 'ready', 1, $3, $4
+     )`,
     [workId, Buffer.byteLength(sampleDocText), sampleDocText, teacherId]
   );
 

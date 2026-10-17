@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import type { Work, ChatMessage, LearningMode, QuotaInfo, User } from '../types.js';
+import type { Work, ChatMessage, LearningMode, QuotaInfo, User, PrimaryCitation, ReferenceCitation } from '../types.js';
 import { apiRequest } from '../api/client.js';
 import { getWorkSuggestions } from '../utils/suggestions.js';
 
@@ -26,6 +26,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [openCitationIdx, setOpenCitationIdx] = useState<number | null>(null);
+  const [expandedContextKey, setExpandedContextKey] = useState<string | null>(null);
   const [docSuggestions, setDocSuggestions] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -163,6 +164,8 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
       const res = await apiRequest<{
         answer: string;
         citations: Array<{ fileName: string; sourceText?: string }>;
+        primaryCitations?: PrimaryCitation[];
+        referenceCitations?: ReferenceCitation[];
         suggestions?: string[];
         isNoSource: boolean;
         toolActuallyUsed: boolean;
@@ -185,6 +188,8 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
         sender: 'ai',
         text: res.answer,
         citations: res.citations || [],
+        primaryCitations: res.primaryCitations || [],
+        referenceCitations: res.referenceCitations || [],
         suggestions: res.suggestions || [],
         isNoSource: res.isNoSource,
         toolActuallyUsed: res.toolActuallyUsed,
@@ -510,8 +515,107 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                     }}
                   />
 
-                  {/* Grounding Citations Panel */}
-                  {msg.citations && msg.citations.length > 0 && (
+                  {/* Dual-Source Citations Panel */}
+                  {((msg.primaryCitations && msg.primaryCitations.length > 0) || (msg.referenceCitations && msg.referenceCitations.length > 0)) ? (
+                    <div className="mt-3 pt-2.5 border-t border-slate-200/60 space-y-2.5">
+                      {/* 1. DẪN CHỨNG TỪ TÁC PHẨM GỐC */}
+                      {msg.primaryCitations && msg.primaryCitations.length > 0 && (
+                        <div className="bg-emerald-50/80 rounded-xl p-2.5 sm:p-3 border border-emerald-200 shadow-2xs space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-950">
+                              <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                              <span>Dẫn chứng từ tác phẩm gốc ({msg.primaryCitations.length})</span>
+                            </div>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold border border-emerald-300">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Đã đối chiếu nguyên tác
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            {msg.primaryCitations.map((pc, pcIdx) => {
+                              const contextKey = `${idx}_${pcIdx}`;
+                              const isContextOpen = expandedContextKey === contextKey;
+                              return (
+                                <div key={pcIdx} className="bg-white/95 rounded-lg p-2.5 border border-emerald-100 space-y-1.5 text-xs">
+                                  {/* Câu trích nguyên văn */}
+                                  <blockquote className="italic text-slate-800 font-serif border-l-2 border-emerald-500 pl-2 py-0.5 bg-emerald-50/30 rounded-r">
+                                    "{pc.quote}"
+                                  </blockquote>
+
+                                  {/* Metadata: Tên văn bản gốc, phiên bản, trang nếu có */}
+                                  <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100 gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-slate-700">{pc.documentTitle}</span>
+                                      <span className="bg-slate-100 text-slate-600 px-1 rounded text-[10px]">v{pc.version}</span>
+                                      {pc.pageNumber ? (
+                                        <span className="bg-emerald-100/80 text-emerald-900 font-medium px-1.5 py-0.2 rounded text-[10px]">
+                                          Trang {pc.pageNumber}
+                                        </span>
+                                      ) : null}
+                                    </div>
+
+                                    {pc.contextSnippet && (
+                                      <button
+                                        onClick={() => setExpandedContextKey(isContextOpen ? null : contextKey)}
+                                        className="text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-0.5 text-[11px] cursor-pointer"
+                                      >
+                                        {isContextOpen ? 'Ẩn ngữ cảnh' : 'Xem ngữ cảnh đoạn'}
+                                        {isContextOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Expanded Context Snippet */}
+                                  {isContextOpen && pc.contextSnippet && (
+                                    <div className="mt-1.5 p-2 bg-slate-50 rounded border border-slate-200 text-[11px] text-slate-600 leading-relaxed font-sans">
+                                      <span className="font-semibold text-slate-700 block mb-0.5">Ngữ cảnh đoạn trích:</span>
+                                      <p className="whitespace-pre-line">{pc.contextSnippet}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 2. NGUỒN HỖ TRỢ PHÂN TÍCH */}
+                      {msg.referenceCitations && msg.referenceCitations.length > 0 && (
+                        <div className="bg-slate-50/90 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 shadow-2xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                              <FileText className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                              <span>Nguồn hỗ trợ phân tích ({msg.referenceCitations.length})</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 italic">
+                              Bổ trợ góc nhìn & lập luận (không trích nguyên tác)
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                            {msg.referenceCitations.map((rc, rcIdx) => (
+                              <div key={rcIdx} className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between text-[11px]">
+                                <span className="font-medium text-slate-700 truncate pr-2" title={rc.documentTitle}>
+                                  {rc.documentTitle}
+                                </span>
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">
+                                  {rc.referenceType === 'lesson_plan'
+                                    ? 'Giáo án'
+                                    : rc.referenceType === 'context'
+                                    ? 'Bối cảnh'
+                                    : rc.referenceType === 'qa_guide'
+                                    ? 'Câu hỏi & đáp'
+                                    : 'Phân tích'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : msg.citations && msg.citations.length > 0 ? (
+                    /* Legacy fallback if neither primary nor reference citations are present */
                     <div className="mt-2.5 pt-2.5 border-t border-slate-200/60">
                       <button
                         onClick={() => setOpenCitationIdx(openCitationIdx === idx ? null : idx)}
@@ -524,7 +628,6 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
                       {openCitationIdx === idx && (
                         <div className="mt-2 space-y-1.5">
-                          {/* Source Files */}
                           {msg.citations.map((c, cIdx) => (
                             <div
                               key={cIdx}
@@ -541,11 +644,10 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                               )}
                             </div>
                           ))}
-
                         </div>
                       )}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Dynamic Follow-up Suggestions directly from reference contents */}
                   {msg.sender === 'ai' && msg.suggestions && msg.suggestions.length > 0 && (

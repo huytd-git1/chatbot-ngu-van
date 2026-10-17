@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { query } from '../db/pool.js';
 import { GeminiService } from './gemini.service.js';
+import { ParagraphService } from './paragraph.service.js';
 
 export interface WorkRow {
   id: string;
@@ -18,6 +19,12 @@ export interface DocumentRow {
   work_id: string;
   title: string;
   doc_type: 'text_primary' | 'analysis' | 'lesson_plan' | 'qa_guide';
+  document_role: 'primary' | 'reference' | 'unclassified';
+  reference_type: 'analysis' | 'context' | 'lesson_plan' | 'other' | 'qa_guide' | null;
+  is_active: boolean;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  ocr_status: 'none' | 'pending' | 'completed' | 'review_needed';
   file_name: string;
   file_search_store_name: string;
   gemini_file_name: string | null;
@@ -66,9 +73,11 @@ export class DocumentService {
     workId: string;
     title: string;
     docType: 'text_primary' | 'analysis' | 'lesson_plan' | 'qa_guide';
+    documentRole?: 'primary' | 'reference' | 'unclassified';
+    referenceType?: 'analysis' | 'context' | 'lesson_plan' | 'other' | 'qa_guide';
     file: { originalname: string; mimetype: string; size: number; buffer: Buffer };
     userId: string;
-  }): Promise<{ documentId: string; status: string }> {
+  }): Promise<{ documentId: string; status: string; documentRole: string }> {
     const { workId, title, docType, file, userId } = params;
 
     // 1. Verify work exists
@@ -76,30 +85,86 @@ export class DocumentService {
     if (workRes.rows.length === 0) {
       throw new Error('Tác phẩm không tồn tại.');
     }
-    const work = workRes.rows[0];
 
-    // 2. Extract preview/raw text if plain text / markdown / csv
+    // 2. Determine initial roles:
+    // If explicitly uploaded as primary by teacher, we can stage it; if docType === 'text_primary' and no role given,
+    // stage as unclassified so teacher confirms activation (or activate if explicitly requested).
+    let documentRole = params.documentRole;
+    let referenceType = params.referenceType;
+    let isActive = false;
+
+    if (!documentRole) {
+      if (docType === 'text_primary') {
+        documentRole = 'primary';
+        isActive = false; // requires explicit activation or activate if no other primary exists
+      } else {
+        documentRole = 'reference';
+        referenceType = (['analysis', 'lesson_plan', 'qa_guide'].includes(docType) ? docType : 'other') as any;
+        isActive = true;
+      }
+    } else {
+      isActive = documentRole === 'reference';
+    }
+
+    // 3. Extract preview/raw text if plain text / markdown / csv
     let rawContent: string | null = null;
     if (file.mimetype.startsWith('text/') || file.originalname.endsWith('.txt') || file.originalname.endsWith('.md')) {
       rawContent = file.buffer.toString('utf-8');
     }
 
-    // 3. Create or reuse Gemini File Search Store for this work
-    // Name convention: work_<workId>
+    // 4. Create or reuse Gemini File Search Store for this work
     const storeDisplayName = `work_${workId}_store`;
     const storeName = await GeminiService.createFileSearchStore(storeDisplayName);
 
-    // 4. Save document record (if rawContent exists like TXT, it is immediately ready for RAG)
+    // 5. Save document record (if rawContent exists like TXT, it is immediately ready for RAG)
     const initialStatus = rawContent ? 'ready' : 'indexing';
+    const ocrStatus = file.originalname.toLowerCase().endsWith('.pdf') ? 'review_needed' : 'none';
+
+    // If document is set as active primary immediately, demote any existing active primary for this work
+    if (documentRole === 'primary' && isActive) {
+      await query(
+        `UPDATE documents SET is_active = false WHERE work_id = $1 AND document_role = 'primary' AND is_active = true`,
+        [workId]
+      );
+    }
+
     const docRes = await query<DocumentRow>(
-      `INSERT INTO documents (work_id, title, doc_type, file_name, file_search_store_name, file_size_bytes, mime_type, status, raw_content, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING id, status`,
-      [workId, title, docType, file.originalname, storeName, file.size, file.mimetype, initialStatus, rawContent, userId]
+      `INSERT INTO documents (
+         work_id, title, doc_type, document_role, reference_type, is_active, ocr_status,
+         file_name, file_search_store_name, file_size_bytes, mime_type, status, version, raw_content, created_by
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $14)
+       RETURNING id, status, document_role`,
+      [
+        workId,
+        title,
+        docType,
+        documentRole,
+        referenceType || null,
+        isActive,
+        ocrStatus,
+        file.originalname,
+        storeName,
+        file.size,
+        file.mimetype,
+        initialStatus,
+        rawContent,
+        userId,
+      ]
     );
     const documentId = docRes.rows[0].id;
 
-    // 5. Send file to Gemini File Search Store asynchronously
+    // 6. If raw content is available, extract paragraphs into work_paragraphs
+    if (rawContent) {
+      await ParagraphService.extractAndSaveParagraphs({
+        documentId,
+        workId,
+        version: 1,
+        rawText: rawContent,
+      });
+    }
+
+    // 7. Send file to Gemini File Search Store asynchronously
     try {
       const { operationName, geminiFileName } = await GeminiService.uploadToFileSearchStore(
         storeName,
@@ -108,7 +173,6 @@ export class DocumentService {
         file.mimetype
       );
 
-      // Save indexing job
       await query(
         `INSERT INTO indexing_jobs (document_id, operation_name, status)
          VALUES ($1, $2, 'running')`,
@@ -120,12 +184,11 @@ export class DocumentService {
         [geminiFileName, documentId]
       );
 
-      // Asynchronously trigger check if not already ready
       if (initialStatus !== 'ready') {
         this.pollJob(documentId, operationName).catch(() => {});
       }
 
-      return { documentId, status: initialStatus };
+      return { documentId, status: initialStatus, documentRole };
     } catch (err: any) {
       if (!rawContent) {
         await query(
@@ -134,8 +197,114 @@ export class DocumentService {
         );
         throw err;
       }
-      return { documentId, status: 'ready' };
+      return { documentId, status: 'ready', documentRole };
     }
+  }
+
+  /**
+   * Atomically activates a document as the sole primary text for a work
+   */
+  static async activatePrimaryDocument(params: {
+    workId: string;
+    documentId: string;
+    userId: string;
+  }): Promise<DocumentRow> {
+    const { workId, documentId, userId } = params;
+
+    const docRes = await query<DocumentRow>(
+      `SELECT * FROM documents WHERE id = $1 AND work_id = $2`,
+      [documentId, workId]
+    );
+
+    if (docRes.rows.length === 0) {
+      throw new Error('Tài liệu không tồn tại hoặc không thuộc tác phẩm này.');
+    }
+
+    const doc = docRes.rows[0];
+
+    // Transaction to ensure atomicity
+    await query('BEGIN');
+    try {
+      // 1. Demote any current active primary for this work
+      await query(
+        `UPDATE documents
+         SET is_active = false
+         WHERE work_id = $1 AND document_role = 'primary' AND is_active = true`,
+        [workId]
+      );
+
+      // 2. Promote target document
+      const newVersion = (doc.version || 1) + 1;
+      const updatedRes = await query<DocumentRow>(
+        `UPDATE documents
+         SET document_role = 'primary',
+             is_active = true,
+             reviewed_by = $1,
+             reviewed_at = NOW(),
+             version = $2,
+             status = 'ready'
+         WHERE id = $3
+         RETURNING *`,
+        [userId, newVersion, documentId]
+      );
+
+      // 3. Ensure paragraphs are extracted and saved for the new version
+      if (doc.raw_content) {
+        await ParagraphService.extractAndSaveParagraphs({
+          documentId,
+          workId,
+          version: newVersion,
+          rawText: doc.raw_content,
+        });
+      }
+
+      await query('COMMIT');
+      return updatedRes.rows[0];
+    } catch (err) {
+      await query('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * Updates document classification (role, reference_type, is_active)
+   */
+  static async updateDocumentClassification(params: {
+    documentId: string;
+    documentRole: 'primary' | 'reference' | 'unclassified';
+    referenceType?: 'analysis' | 'context' | 'lesson_plan' | 'other' | 'qa_guide' | null;
+    userId: string;
+  }): Promise<DocumentRow> {
+    const { documentId, documentRole, referenceType, userId } = params;
+
+    const docRes = await query<DocumentRow>(`SELECT * FROM documents WHERE id = $1`, [documentId]);
+    if (docRes.rows.length === 0) {
+      throw new Error('Tài liệu không tồn tại.');
+    }
+    const doc = docRes.rows[0];
+
+    if (documentRole === 'primary') {
+      return this.activatePrimaryDocument({
+        workId: doc.work_id,
+        documentId,
+        userId,
+      });
+    }
+
+    const isActive = documentRole === 'reference';
+    const updated = await query<DocumentRow>(
+      `UPDATE documents
+       SET document_role = $1,
+           reference_type = $2,
+           is_active = $3,
+           reviewed_by = $4,
+           reviewed_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [documentRole, referenceType || null, isActive, userId, documentId]
+    );
+
+    return updated.rows[0];
   }
 
   /**

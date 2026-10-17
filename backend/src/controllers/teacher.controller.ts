@@ -4,6 +4,7 @@ import { query } from '../db/pool.js';
 import { AuthService } from '../services/auth.service.js';
 import { CsvService } from '../services/csv.service.js';
 import { DocumentService } from '../services/document.service.js';
+import { ParagraphService } from '../services/paragraph.service.js';
 import { QuotaService } from '../services/quota.service.js';
 
 export class TeacherController {
@@ -500,11 +501,17 @@ export class TeacherController {
   static async getDocumentsForWork(req: Request, res: Response): Promise<void> {
     const { workId } = req.params;
     const { rows } = await query(
-      `SELECT d.*, u.full_name as creator_name
+      `SELECT d.*, u.full_name as creator_name, r.full_name as reviewer_name
        FROM documents d
        LEFT JOIN users u ON d.created_by = u.id
+       LEFT JOIN users r ON d.reviewed_by = r.id
        WHERE d.work_id = $1
-       ORDER BY d.created_at DESC`,
+       ORDER BY
+         CASE WHEN d.document_role = 'primary' AND d.is_active = true THEN 0
+              WHEN d.document_role = 'reference' THEN 1
+              ELSE 2
+         END,
+         d.created_at DESC`,
       [workId]
     );
 
@@ -521,7 +528,7 @@ export class TeacherController {
     }
 
     const { workId } = req.params;
-    const { title, docType } = req.body;
+    const { title, docType, documentRole, referenceType } = req.body;
     const file = req.file;
 
     if (!file) {
@@ -549,6 +556,8 @@ export class TeacherController {
         workId,
         title,
         docType,
+        documentRole,
+        referenceType,
         file: {
           originalname: file.originalname,
           mimetype: file.mimetype,
@@ -562,11 +571,102 @@ export class TeacherController {
         message: 'Tài liệu đã được tải lên và đang được lập chỉ mục (File Search Store Indexing).',
         documentId: result.documentId,
         status: result.status,
+        documentRole: result.documentRole,
       });
     } catch (err: any) {
       console.error('[TeacherController] Upload error:', err);
       res.status(500).json({ error: err.message || 'Lỗi xử lý file.' });
     }
+  }
+
+  /**
+   * Activate document as primary original text (atomic switch)
+   */
+  static async activatePrimaryDocument(req: Request, res: Response): Promise<void> {
+    if (!req.user) {
+      res.status(401).json({ error: 'Chưa đăng nhập.' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const docRes = await query<{ work_id: string }>(`SELECT work_id FROM documents WHERE id = $1`, [documentId]);
+    if (docRes.rows.length === 0) {
+      res.status(404).json({ error: 'Tài liệu không tồn tại.' });
+      return;
+    }
+
+    try {
+      const updated = await DocumentService.activatePrimaryDocument({
+        workId: docRes.rows[0].work_id,
+        documentId,
+        userId: req.user.id,
+      });
+
+      res.status(200).json({
+        message: 'Đã kích hoạt làm Văn bản tác phẩm gốc (Duy nhất) có hiệu lực.',
+        document: updated,
+      });
+    } catch (err: any) {
+      console.error('[TeacherController] activatePrimaryDocument error:', err);
+      res.status(500).json({ error: err.message || 'Lỗi kích hoạt văn bản gốc.' });
+    }
+  }
+
+  /**
+   * Update document classification (role, reference_type)
+   */
+  static async updateDocumentClassification(req: Request, res: Response): Promise<void> {
+    if (!req.user) {
+      res.status(401).json({ error: 'Chưa đăng nhập.' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const schema = z.object({
+      documentRole: z.enum(['primary', 'reference', 'unclassified']),
+      referenceType: z.enum(['analysis', 'context', 'lesson_plan', 'other', 'qa_guide']).optional().nullable(),
+    });
+
+    const parse = schema.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: parse.error.issues[0]?.message });
+      return;
+    }
+
+    try {
+      const updated = await DocumentService.updateDocumentClassification({
+        documentId,
+        documentRole: parse.data.documentRole,
+        referenceType: parse.data.referenceType,
+        userId: req.user.id,
+      });
+
+      res.status(200).json({
+        message: 'Đã cập nhật phân loại tài liệu thành công.',
+        document: updated,
+      });
+    } catch (err: any) {
+      console.error('[TeacherController] updateDocumentClassification error:', err);
+      res.status(500).json({ error: err.message || 'Lỗi cập nhật phân loại tài liệu.' });
+    }
+  }
+
+  /**
+   * Get extracted paragraphs of a document for preview / OCR verification
+   */
+  static async getDocumentParagraphs(req: Request, res: Response): Promise<void> {
+    const { documentId } = req.params;
+    const paragraphs = await ParagraphService.getParagraphsForDocument(documentId);
+    res.status(200).json({ paragraphs });
+  }
+
+  /**
+   * Get document diff and alignment report
+   */
+  static async getDocumentDiffReport(req: Request, res: Response): Promise<void> {
+    const { workId } = req.params;
+    const report = await ParagraphService.generateDocumentDiffReport(workId);
+    res.status(200).json({ report });
   }
 
   /**

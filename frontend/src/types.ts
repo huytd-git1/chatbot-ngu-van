@@ -37,6 +37,13 @@ export interface DocumentItem {
   work_id: string;
   title: string;
   doc_type: 'text_primary' | 'analysis' | 'lesson_plan' | 'qa_guide';
+  document_role: 'primary' | 'reference' | 'unclassified';
+  reference_type: 'analysis' | 'context' | 'lesson_plan' | 'other' | 'qa_guide' | null;
+  is_active: boolean;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  reviewer_name?: string | null;
+  ocr_status: 'none' | 'pending' | 'completed' | 'review_needed';
   file_name: string;
   file_search_store_name: string;
   file_size_bytes: number;
@@ -45,6 +52,57 @@ export interface DocumentItem {
   version: number;
   created_at: string;
   creator_name?: string;
+}
+
+export interface PrimaryCitation {
+  documentTitle: string;
+  version: number;
+  quote: string;
+  pageNumber?: number | null;
+  paragraphOrder?: number;
+  verified: boolean;
+  contextSnippet?: string;
+}
+
+export interface ReferenceCitation {
+  documentTitle: string;
+  referenceType?: string | null;
+  role: string;
+}
+
+export interface ParagraphItem {
+  id: string;
+  document_id: string;
+  work_id: string;
+  version: number;
+  paragraph_order: number;
+  page_number: number | null;
+  content: string;
+  normalized_content: string;
+  created_at: string;
+}
+
+export interface DocumentDiffItem {
+  referenceDocTitle: string;
+  quoteCandidate: string;
+  foundInPrimary: boolean;
+  matchedParagraphOrder?: number;
+  notes: string;
+}
+
+export interface DocumentDiffReport {
+  workId: string;
+  hasActivePrimary: boolean;
+  primaryDoc?: {
+    id: string;
+    title: string;
+    version: number;
+    paragraphCount: number;
+  };
+  referenceDocsCount: number;
+  discrepanciesCount: number;
+  items: DocumentDiffItem[];
+  generatedAt: string;
 }
 
 export interface ClassItem {
@@ -78,6 +136,8 @@ export interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
   citations?: FileCitation[];
+  primaryCitations?: PrimaryCitation[];
+  referenceCitations?: ReferenceCitation[];
   suggestions?: string[];
   isNoSource?: boolean;
   toolActuallyUsed?: boolean;

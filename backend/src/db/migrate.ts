@@ -231,6 +231,48 @@ export async function runMigrations() {
     `,
     `
     ALTER TABLE chat_requests ADD COLUMN IF NOT EXISTS verification_meta TEXT;
+    `,
+    `
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_role VARCHAR(30) DEFAULT 'unclassified' CHECK (document_role IN ('primary', 'reference', 'unclassified'));
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS reference_type VARCHAR(50) CHECK (reference_type IS NULL OR reference_type IN ('analysis', 'context', 'lesson_plan', 'other', 'qa_guide'));
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false;
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS ocr_status VARCHAR(30) DEFAULT 'none' CHECK (ocr_status IN ('none', 'pending', 'completed', 'review_needed'));
+    `,
+    `
+    UPDATE documents
+    SET document_role = CASE
+          WHEN doc_type = 'text_primary' THEN 'primary'
+          ELSE 'reference'
+        END,
+        reference_type = CASE
+          WHEN doc_type IN ('analysis', 'lesson_plan', 'qa_guide') THEN doc_type
+          WHEN doc_type = 'text_primary' THEN NULL
+          ELSE 'other'
+        END,
+        is_active = (doc_type = 'text_primary'),
+        reviewed_at = COALESCE(reviewed_at, created_at)
+    WHERE document_role IS NULL OR document_role = 'unclassified';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_primary_per_work
+    ON documents(work_id)
+    WHERE document_role = 'primary' AND is_active = true;
+    `,
+    `
+    CREATE TABLE IF NOT EXISTS work_paragraphs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL DEFAULT 1,
+      paragraph_order INTEGER NOT NULL,
+      page_number INTEGER,
+      content TEXT NOT NULL,
+      normalized_content TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_paragraphs_doc ON work_paragraphs(document_id);
+    CREATE INDEX IF NOT EXISTS idx_paragraphs_work_ver ON work_paragraphs(work_id, version);
     `
   ];
 

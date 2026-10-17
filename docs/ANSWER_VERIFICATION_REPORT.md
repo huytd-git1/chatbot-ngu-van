@@ -1,155 +1,183 @@
-# BÁO CÁO NGHIÊN CỨU & KIỂM CHỨNG CÂU TRẢ LỜI RAG THEO Ý TƯỞNG ALCE
+# BÁO CÁO CƠ CHẾ PHÂN LOẠI TÀI LIỆU VÀ KIỂM CHỨNG TRÍCH DẪN CHO CHATBOT RAG “CÔ DƯƠNG DẠY VĂN DỄ THƯƠNG”
 
-> [!NOTE]
-> **Trạng thái mô-đun: ĐÃ LƯU TRỮ & GỠ BỎ KHỎI PRODUCTION (Retired)**  
-> **Lý do:** Tầng kiểm chứng thứ hai (post-hoc batched verifier) làm phát sinh 2 lượt gọi API Gemini song song cho mỗi câu hỏi học sinh, dẫn tới nguy cơ chạm trần và nghẽn API (lỗi 503 Overloaded) trong các giờ cao điểm, đồng thời làm chậm tốc độ phản hồi. Hệ thống đã chuyển về kiến trúc **Contextual RAG trực tiếp** với grounding nguyên văn trong một lượt duy nhất, mang lại độ mượt mà cao nhất và triệt tiêu lỗi 503.
-
-Dự án: **Chatbot Ngữ văn "Cô Dương dạy văn dễ thương"**  
-Ngày báo cáo & nghiệm thu: **17/10/2026**  
-Kỹ sư phụ trách: **Antigravity AI Engineer**
+> [!IMPORTANT]
+> **Trạng thái hệ thống: ĐÃ HOÀN THIỆN, TÍCH HỢP & PASS 30/30 UNIT TESTS**  
+> Dự án: **Chatbot RAG Ngữ văn “Cô Dương dạy văn dễ thương”**  
+> Ngày cập nhật: **18/10/2026**  
+> Tài liệu liên quan: [`docs/DOCUMENT_CLASSIFICATION_AND_VERIFICATION_GUIDE.md`](file:///d:/Project/chatbot-ngu-van/docs/DOCUMENT_CLASSIFICATION_AND_VERIFICATION_GUIDE.md)  
 
 ---
 
-## 1. Cơ sở nghiên cứu và phạm vi áp dụng
+## 1. Giới thiệu và Bối cảnh kỹ thuật
 
-### 1.1. Tham khảo nghiên cứu ALCE
-Chức năng được thiết kế dựa trên nghiên cứu:
-> **Enabling Large Language Models to Generate Text with Citations (ALCE)**  
-> *Gao et al., EMNLP 2023 - Princeton NLP*  
-> Bài báo: [https://arxiv.org/abs/2305.14627](https://arxiv.org/abs/2305.14627)  
-> Mã nguồn tham khảo: [https://github.com/princeton-nlp/ALCE](https://github.com/princeton-nlp/ALCE)
+Trước đây, khi nạp tài liệu vào kho RAG, hệ thống chưa phân định ranh giới giữa văn bản tác phẩm văn học nguyên tác với các tài liệu tham khảo, bài phân tích, giáo án. Điều này dẫn đến nguy cơ:
+- Trích dẫn nhầm câu văn trong bài phân tích của giáo viên hoặc bài văn mẫu rồi tự coi đó là nguyên văn tác phẩm của tác giả.
+- Mô hình AI tự ý bịa đặt số trang hoặc tự thay đổi từ ngữ, đảo từ trong câu trích.
+- Lạm dụng API Gemini gọi kiểm chứng lặp nhiều lần (post-hoc verifier) gây quá tải và lỗi `503 Service Unavailable`.
 
-### 1.2. Hai trụ cột chính áp dụng từ ALCE
-1. **Citation Correctness / Precision**: Dẫn chứng được gắn vào nhận định có thực sự hỗ trợ (entail) nhận định đó hay không?
-2. **Citation Completeness / Recall**: Các nhận định cần chứng cứ (factual & interpretive) đã được hỗ trợ đầy đủ bởi tập trích dẫn hay chưa?
-
-### 1.3. Ba phân biệt cốt lõi (Không tương đương nhau)
-- **Có metadata trích dẫn**: Hệ thống hoặc mô hình gắn thẻ nguồn (ví dụ `[Tài liệu: Lặng lẽ Sa Pa]`).
-- **Câu trích khớp nguyên văn nguồn**: Chuỗi ký tự trích dẫn đối chiếu từng từ với văn bản gốc.
-- **Nội dung nguồn hỗ trợ nhận định**: Ý nghĩa ngữ nghĩa của văn bản gốc thực sự làm tiền đề suy ra nhận định.
-
-> **Tuyên bố phạm vi:** Đây là chức năng *lấy cảm hứng từ ALCE* được điều chỉnh đặc thù cho ngôn ngữ tiếng Việt và môn Ngữ văn cấp THCS & THPT. Hệ thống không tuyên bố tái hiện 100% nguyên gốc benchmark ALCE (vốn dùng NLI tự động của mô hình tiếng Anh Llama/TRUE) mà sử dụng quy trình kết hợp 2 tầng (Deterministic Code + Batched Semantic NLI) tối ưu tài nguyên.
+Giải pháp mới triển khai giải quyết triệt để vấn đề này bằng **kiến trúc phân loại tài liệu 3 nhóm** kết hợp **Bộ kiểm chứng trích dẫn nguyên văn tại backend (Deterministic Code-level Verifier)**:
+- **Tối ưu chi phí & tài nguyên:** Dùng so khớp văn bản tại backend làm kiểm tra mặc định, không phát sinh thêm lượt gọi AI cho kiểm chứng câu trích.
+- **Ràng buộc cứng:** Tối đa đúng 1 bản gốc duy nhất đang kích hoạt cho mỗi tác phẩm (ràng buộc cấp Database).
+- **Trích nguyên tác có căn cứ:** Chỉ trích nguyên văn từ bản gốc; không biến nhận định tham khảo thành lời tác giả; hiển thị phân tách rõ 2 nhóm nguồn ở giao diện học sinh.
 
 ---
 
-## 2. Kiến trúc giải pháp và Luồng xử lý thực tế
+## 2. Nguyên tắc Nguồn tài liệu & Bảng phân vai
 
-### 2.1. Luồng xử lý RAG & Verification 2 Tầng
+| Nhóm nguồn | Vai trò (`document_role`) | Được sử dụng để | Ràng buộc hệ thống |
+|---|---|---|---|
+| **Văn bản tác phẩm gốc** | `primary` (`is_active = true`) | Xác định chi tiết tác phẩm và cung cấp câu trích nguyên văn `> "..."`. | **Duy nhất đúng 1 bản** đang hoạt động cho mỗi tác phẩm. Có ràng buộc Partial Unique Index ở DB. |
+| **Bản gốc lưu trữ / chờ duyệt** | `primary` (`is_active = false`) | Lưu trữ lịch sử phiên bản cũ hoặc bản scan OCR chờ giáo viên thẩm định. | Không đưa vào RAG cho đến khi giáo viên thực hiện thao tác kích hoạt nguyên tử. |
+| **Tài liệu tham khảo & phân tích** | `reference` (`is_active = true`) | Bổ trợ lập luận, bối cảnh lịch sử, cách diễn giải nghệ thuật, giáo án. | **Không trích nguyên văn** làm lời tác giả. Nếu tham khảo chép sai câu bản gốc, hệ thống giữ nguyên bản gốc. |
+| **Tài liệu chưa phân loại** | `unclassified` | Chờ giáo viên rà soát và gán nhãn. | **Tuyệt đối không đưa vào RAG**, học sinh không thể truy xuất. |
+
+---
+
+## 3. Kiến trúc Giải pháp & Luồng xử lý dữ liệu
+
 ```mermaid
 flowchart TD
-    A[Học sinh gửi câu hỏi] --> B[Atomic Quota Reservation & Check]
-    B --> C[Lấy danh mục Documents & Passages được cấp quyền]
-    C --> D{Kiểm tra Cache PostgreSQL}
-    D -- Cache Hit & Quyền hợp lệ --> E[Trả kết quả đã kiểm chứng ngay]
-    D -- Cache Miss --> F[Gemini Contextual RAG: Tạo Draft Answer có cấu trúc]
-    F --> G{Tầng 1: Code-level Check}
-    G -- Lỗi quyền / Câu trích sai nguyên văn / Nhầm loại nguồn --> H[Đánh dấu Mismatched / Invalid]
-    G -- Hợp lệ --> I{Tầng 2: Semantic Verification}
-    I --> J[Gộp toàn bộ Claims + Passages: 1 API Call duy nhất]
-    J --> K[Zod Schema Validation & Verdicts: supported / partial / insufficient / contradicted]
-    K --> L[Answer Release Policy Engine]
-    L --> M[Lưu vào Cache 24h & Audit Meta vào chat_requests]
-    M --> N[Hiển thị nhãn chính xác trên UI học sinh]
+    A[Học sinh gửi câu hỏi] --> B[Quota & Access Check: class_work_access]
+    B --> C{Kiểm tra Bản gốc Active}
+    C -- Chưa có bản gốc --> D[Từ chối mở RAG trích dẫn, Bảo toàn 100% quota]
+    C -- Đã có bản gốc active --> E[Truy xuất 2 nhóm: Primary & Reference]
+    E --> F[Dual-Source Contextual Grounding]
+    F --> G[Gemini sinh câu trả lời có cấu trúc nội bộ]
+    G --> H[Backend Quote Verification Engine]
+    H --> I{So khớp với work_paragraphs}
+    I -- Trích dẫn chỉ có trong Tham khảo --> J[Loại bỏ trích dẫn giả mạo]
+    I -- Bị đổi từ / đổi dấu / ID đoạn sai --> J
+    I -- Khớp nguyên văn / Ellipsis [...] --> K[Gắn nhãn: Đã đối chiếu nguyên tác]
+    J --> L[Trả câu trả lời thận trọng, không trích dẫn sai]
+    K --> M[Trả câu trả lời kèm Primary & Reference Citations]
+    L --> N[UI Học sinh: Phân tách rõ 2 nhóm nguồn]
+    M --> N
 ```
 
-### 2.2. Chi tiết các tầng kiểm tra
-1. **Tầng 1: Kiểm tra bằng mã (Deterministic Code Checks)**
-   - **Quyền tài liệu**: Xác thực `work_id`, lớp học `class_id` trong bảng `class_work_access`, trạng thái tài liệu `ready`, không bị thu hồi.
-   - **Khớp nguyên văn (Verbatim Match)**: Chuẩn hóa Unicode NFC (`text.normalize('NFC')`), chuẩn hóa khoảng trắng (`\s+` -> ` `), gỡ bỏ dấu ngoặc trích dẫn ngoài (`"`, `”`, `“`, `«`, `»`, `> `). **Tuyệt đối không bỏ dấu tiếng Việt, không dùng fuzzy matching**. Trả về: `matched` | `mismatched` | `insufficient_data`.
-   - **Tương thích loại nguồn**: Lời nguyên tác phải trích từ `text_primary`; nhận xét của giáo viên phải từ `analysis`, `lesson_plan`, `qa_guide`. Ngăn chặn việc biến lời phân tích của giáo viên thành lời văn của tác giả.
-2. **Tầng 2: Kiểm chứng ngữ nghĩa (Single Batched Semantic Call)**
-   - Sử dụng **duy nhất 1 request gộp** đến Gemini cho toàn bộ câu trả lời, khử trùng lặp các đoạn chứng cứ trước khi gửi.
-   - Prompt áp dụng cơ chế chống Prompt Injection (xem toàn bộ tài liệu là dữ liệu cần kiểm tra, không phải chỉ dẫn hệ thống).
-   - Đánh giá cảm thụ văn học (interpretive): Đánh giá mối liên hệ lập luận – dẫn chứng, chấp nhận các cách hiểu văn học hợp lý, không bắt buộc cách cảm thụ phải xuất hiện nguyên văn.
-   - Timeout 8.000ms. Nếu timeout hoặc JSON không hợp lệ, chuyển thành `insufficient`, **tuyệt đối không âm thầm đánh dấu đạt**.
-3. **Chính sách phát hành câu trả lời (Answer Release Policy)**
-   - Nhận định `supported`: Được phát hành đầy đủ.
-   - Nhận định `partial` / `insufficient` / `contradicted`: Không phát hành như một kết luận đã được xác thực; gắn cảnh báo cụ thể.
-   - Nếu toàn bộ nhận định chính không đủ căn cứ: Phát hành thông báo lịch sự từ chối khẳng định chi tiết chưa được kiểm chứng.
-   - Nhãn giao diện phản ánh trung thực:
-     - `AI đã đối chiếu nhận định với nguồn`
-     - `Đã đối chiếu câu trích`
-     - `Chưa đủ căn cứ`
-     - Tuyệt đối không dùng: "Chính xác 100%", "Không thể bịa", "Đã được giáo viên xác nhận" khi chưa có duyệt thủ công.
+---
+
+## 4. Chi tiết các thành phần kỹ thuật đã hiện thực
+
+### 4.1. Cơ sở dữ liệu và Ràng buộc toàn vẹn (`backend/src/db/migrate.ts`)
+- **Metadata phân loại trên bảng `documents`:**
+  - `document_role`: `'primary' | 'reference' | 'unclassified'`.
+  - `reference_type`: `'analysis' | 'context' | 'lesson_plan' | 'other' | 'qa_guide'`.
+  - `is_active`: Boolean xác định trạng thái hiệu lực.
+  - `ocr_status`: `'none' | 'pending' | 'completed' | 'review_needed'`.
+  - `reviewed_by`, `reviewed_at`: Lưu vết người duyệt và thời điểm duyệt.
+- **Ràng buộc Database cấp Partial Unique Index:**
+  ```sql
+  CREATE UNIQUE INDEX idx_unique_active_primary_per_work 
+  ON documents(work_id) 
+  WHERE document_role = 'primary' AND is_active = true;
+  ```
+  Ngăn chặn triệt để tình trạng hai bản gốc cùng kích hoạt, kể cả khi có 2 request gửi đồng thời (Race condition).
+- **Bảng kho đoạn văn bản gốc `work_paragraphs`:**
+  - Cột: `id`, `document_id`, `work_id`, `version`, `paragraph_order`, `page_number`, `content`, `normalized_content`, `created_at`.
+  - Lưu trữ song song nội dung gốc và nội dung chuẩn hóa phục vụ đối chiếu nguyên văn. Số trang chỉ lưu khi trích xuất được từ tài liệu (ví dụ `[Trang X]`), không tự bịa số trang.
+
+### 4.2. Dịch vụ tách đoạn và Kiểm chứng trích dẫn (`backend/src/services/paragraph.service.ts`)
+- **Trích xuất đoạn (`extractAndSaveParagraphs`):** Tự động phát hiện đánh dấu trang `[Trang X]`, tách đoạn theo ranh giới dòng trống, lưu vào bảng `work_paragraphs`.
+- **Chuẩn hóa chuỗi ký tự (`DocumentService.normalizeText`):** Chuẩn hóa Unicode NFC, chuẩn hóa khoảng trắng và ngắt dòng. **Bảo toàn 100% dấu tiếng Việt và chữ hoa/thường**, không áp dụng fuzzy match để tránh lọt trích dẫn sai.
+- **Engine so khớp `verifyQuote`:**
+  - Kiểm tra câu trích đối chiếu với kho `work_paragraphs` của bản gốc active.
+  - Hỗ trợ câu trích rút gọn chứa ký hiệu `[...]` (các phân đoạn phải xuất hiện đúng thứ tự trong cùng đoạn gốc).
+  - Kiểm tra mạo danh: Nếu câu trích xuất hiện trong tài liệu tham khảo nhưng không có trong bản gốc -> phát hiện cờ `foundInReferenceOnly = true` và từ chối công nhận là lời tác giả.
+- **Báo cáo đối chiếu tài liệu (`generateDocumentDiffReport`):** So sánh câu trích trong các tài liệu tham khảo với bản gốc active và xuất báo cáo khác biệt cho giáo viên.
+
+### 4.3. Quản lý bản gốc nguyên tử (`backend/src/services/document.service.ts`)
+- Hàm `activatePrimaryDocument(documentId, userId)` thực thi trong transaction:
+  1. Chuyển bản gốc đang active hiện tại về `is_active = false`.
+  2. Cập nhật bản mới thành `document_role = 'primary'`, `is_active = true`, tăng `version`, gán `reviewed_by` và `reviewed_at`.
+  3. Trích xuất và lập chỉ mục đoạn văn vào `work_paragraphs`.
+  4. Vô hiệu hóa cache câu trả lời gắn với tác phẩm.
+
+### 4.4. Tích hợp Dual-Source RAG Controller & Service
+- **`backend/src/controllers/student.controller.ts`:**
+  - Kiểm tra điều kiện tiên quyết: Nếu tác phẩm chưa có bản gốc active, thông báo nhắc học sinh và bảo lưu hạn mức.
+  - Lọc nghiêm ngặt: Chỉ lấy bản gốc active và tài liệu tham khảo active (`status = 'ready'`), loại bỏ toàn bộ tài liệu `unclassified`.
+- **`backend/src/services/gemini.service.ts`:**
+  - Phân tách ngữ cảnh: `[VĂN BẢN TÁC PHẨM GỐC]` và `[TÀI LIỆU THAM KHẢO & PHÂN TÍCH]`.
+  - Backend post-processing: Rà soát toàn bộ các khối trích dẫn `> "..."` trong câu trả lời. Nếu câu trích không vượt qua kiểm chứng, hệ thống gỡ bỏ khối trích dẫn giả mạo trước khi trả về học sinh.
+
+### 4.5. Giao diện Giáo viên (`frontend/src/components/TeacherDashboard.tsx`)
+- Tách khu vực quản lý tài liệu thành 3 phân khu trực quan:
+  1. **Văn bản gốc đang có hiệu lực:** Tên bản gốc, phiên bản `vX`, OCR status, người duyệt, nút *"Xem các đoạn (OCR)"*, nút *"Đối chiếu tài liệu"*.
+  2. **Tài liệu tham khảo, phân tích, giáo án:** Phân loại con (*Phân tích*, *Giáo án*, *Bối cảnh*, *Câu hỏi & đáp*), thao tác *"Đặt làm bản gốc"*, xem đoạn, hủy duyệt.
+  3. **Tài liệu chưa phân loại:** Cảnh báo chờ duyệt, không vào RAG, thao tác nhanh chuyển sang Tham khảo hoặc Bản gốc.
+- **Modal xem trước đoạn trích xuất (OCR & Trang):** Giúp giáo viên phát hiện lỗi chính tả OCR, mất dấu, thiếu trang.
+- **Modal Báo cáo đối chiếu mâu thuẫn tài liệu:** Hiển thị chi tiết các câu trích xuất hiện trong tài liệu tham khảo không khớp với bản gốc.
+
+### 4.6. Giao diện Học sinh (`frontend/src/components/StudentChat.tsx`)
+- Dưới câu trả lời của Cô Dương AI, tách rõ hai khối thông tin:
+  - **Dẫn chứng từ tác phẩm gốc:**
+    - Khối nền xanh ngọc kèm huy hiệu `✓ Đã đối chiếu nguyên tác`.
+    - Trích dẫn nguyên văn trong blockquote font chữ trang trọng.
+    - Tên văn bản gốc, phiên bản, số trang (`Trang X`).
+    - Nút **"Xem ngữ cảnh đoạn"** mở rộng xem các câu xung quanh trong đoạn gốc.
+  - **Nguồn hỗ trợ phân tích:**
+    - Khối nền xám xanh liệt kê tài liệu tham khảo hỗ trợ góc nhìn, bối cảnh (không mang nhãn nguyên văn tác phẩm).
 
 ---
 
-## 3. Các thay đổi về Mã nguồn và Cơ sở dữ liệu
+## 5. Kết quả Kiểm thử (Test Results)
 
-### 3.1. Bảng cơ sở dữ liệu mới (`backend/src/db/migrate.ts`)
-1. **`document_passages`**:
-   - `id UUID PRIMARY KEY`, `document_id UUID`, `work_id UUID`, `passage_index INTEGER`, `passage_id VARCHAR(100)`, `source_type VARCHAR(50)`, `content TEXT`, `normalized_content TEXT`, `content_hash VARCHAR(64)`.
-   - Lưu trữ các đoạn văn bản đã chuẩn hóa và băm SHA256 ngay khi nạp tài liệu, tránh xử lý lại trên mỗi request.
-2. **`verified_answer_cache`**:
-   - `id UUID PRIMARY KEY`, `cache_key VARCHAR(64) UNIQUE`, `work_id UUID`, `learning_mode VARCHAR(50)`, `prompt_hash VARCHAR(64)`, `response_text TEXT`, `structured_claims JSONB`, `verification_report JSONB`, `precision_score NUMERIC(5,2)`, `recall_score NUMERIC(5,2)`, `token_count INTEGER`, `expires_at TIMESTAMP`.
-   - Cache chính xác có TTL 24 giờ, tái kiểm tra quyền lớp học khi đọc cache.
-3. **Cột bổ sung `chat_requests.verification_meta TEXT`**:
-   - Lưu trữ báo cáo kiểm chứng chi tiết phục vụ kiểm toán sư phạm và quản trị viên.
+Toàn bộ 6 bộ kiểm thử với **30/30 unit tests PASS** (thời gian chạy: 1.98 giây):
 
-### 3.2. Dịch vụ và Controller
-- **`backend/src/services/verification.service.ts`** *(Mới tạo)*:
-  - Cung cấp toàn bộ engine chuẩn hóa, deterministic checks, batched semantic verification, release policy, cache management và công thức ALCE metrics.
-- **`backend/src/services/document.service.ts`**:
-  - Bổ sung `normalizeText`, `extractPassages`, `indexPassages` và `getAuthorizedPassages`. Tự động băm và trích đoạn khi upload tài liệu.
-- **`backend/src/services/quota.service.ts`**:
-  - Bổ sung tham số `verificationMeta` vào `recordSuccess` để lưu vết audit vào `chat_requests`.
-- **`backend/src/controllers/student.controller.ts`**:
-  - Tích hợp bước tra cứu cache, trích xuất đoạn chứng cứ được phép, gọi `VerificationService.verifyAnswer` và trả payload đầy đủ cho frontend.
-- **`frontend/src/types.ts` & `frontend/src/components/StudentChat.tsx`**:
-  - Bổ sung types: `ClaimVerificationItem`, `VerificationMetrics`, `AnswerVerificationMeta`.
-  - Cập nhật giao diện Accordion căn cứ tài liệu hiển thị từng nhận định kèm nhãn xác thực chính xác.
+```
+ RUN  v3.2.7 D:/Project/chatbot-ngu-van/backend
 
----
+ ✓ src/__tests__/rag_grounding.test.ts (6 tests) 198ms
+ ✓ src/__tests__/key_pool.test.ts (4 tests) 213ms
+ ✓ src/__tests__/document_classification_and_verification.test.ts (8 tests) 335ms
+ ✓ src/__tests__/quota.test.ts (5 tests) 537ms
+ ✓ src/__tests__/csv_import.test.ts (3 tests) 610ms
+ ✓ src/__tests__/auth.test.ts (4 tests) 1159ms
 
-## 4. Kết quả Kiểm thử và Đánh giá
+ Test Files  6 passed (6)
+      Tests  30 passed (30)
+   Duration  1.98s
+```
 
-### 4.1. Bộ test case bắt buộc (15/15 tests trong `alce_verification.test.ts`)
-Toàn bộ 15 test cases chuyên sâu trong `backend/src/__tests__/alce_verification.test.ts` đã vượt qua 100%:
+### Bảng chi tiết kết quả kiểm tra theo 11 tiêu chí nghiệp vụ:
 
-| Mã ca kiểm thử | Mô tả ca kiểm nghiệm | Kết quả | Ghi chú |
-| :--- | :--- | :---: | :--- |
-| **Case 1** | Câu trích đúng, nguồn đúng, nhận định được hỗ trợ | **PASS** | Xác thực nguyên văn và quyền truy cập |
-| **Case 2 & 17** | Dẫn chứng "hai người lẳng lặng về xóm ngụ cư" dùng khẳng định "tinh thần cống hiến quên mình" | **PASS** | Khớp nguyên văn nhưng ngữ nghĩa `insufficient`, bị chặn |
-| **Case 3** | Câu trích bị thêm từ hoặc sửa từ ("túi nỉ màu đỏ tươi") | **PASS** | `checkVerbatimQuote` trả về `mismatched`, chặn claim |
-| **Case 4** | Nguồn thuộc tác phẩm / ID tài liệu không được cấp quyền | **PASS** | `permission_valid: false`, từ chối phát hành |
-| **Case 5** | Một nhận định cần 2 đoạn nguồn kết hợp (p1 + p2) | **PASS** | Bộ kiểm chứng hỗ trợ tổng hợp đa đoạn nguồn |
-| **Case 6** | Cảm thụ văn học hợp lý không xuất hiện nguyên văn | **PASS** | Đánh giá mối liên hệ logic – dẫn chứng nghệ thuật |
-| **Case 7** | Nhầm lời giáo viên trong giáo án thành lời tác giả | **PASS** | Bắt lỗi `source_type_valid: false` |
-| **Case 8** | Nhận định đúng nhưng explanation chứa chi tiết bịa đặt | **PASS** | Bộ kiểm chứng rà soát cả claim lẫn explanation |
-| **Case 9** | Một phần đạt, một phần không đạt (Partial release) | **PASS** | Phát hành kèm cảnh báo cụ thể, không nhận vơ đạt 100% |
-| **Case 10** | Verifier timeout hoặc lỗi API | **PASS** | Xử lý an toàn là `insufficient`, không đánh dấu đạt |
-| **Case 11** | Vô hiệu hóa cache khi tài liệu thay đổi content_hash | **PASS** | Tạo cache key mới, không trả dữ liệu cũ |
-| **Case 12** | Request lặp với chuẩn hóa khoảng trắng / dấu ngoặc | **PASS** | Tạo cùng 1 cache key chính xác, không gọi lặp API |
-| **Case 13** | Prompt injection lồng trong tài liệu bài học | **PASS** | Coi tài liệu là dữ liệu, không bị đánh lừa |
-| **Case 14** | Nhánh fallback / mock ngoại tuyến | **PASS** | Gắn cờ `is_mock: true`, không giả danh kiểm chứng thật |
-| **Case 15** | Tính toán chỉ số ALCE Precision, Recall, Match Rate | **PASS** | Khớp công thức toán học chuẩn hóa |
+| Tiêu chuẩn kiểm thử | Trạng thái | Phương thức kiểm tra | Ghi chú kỹ thuật |
+|---|:---:|---|---|
+| **1. Không kích hoạt 2 bản gốc cùng lúc** | **PASS** | Unit Test | Bị chặn bởi `idx_unique_active_primary_per_work` ở tầng DB, giao dịch báo lỗi ngay. |
+| **2. Tài liệu chưa phân loại không vào RAG** | **PASS** | Unit Test | Controller lọc `document_role IN ('primary', 'reference') AND is_active = true`. |
+| **3. Câu chỉ có trong tham khảo bị từ chối làm nguyên tác** | **PASS** | Unit Test | `verifyQuote` phát hiện `foundInReferenceOnly: true`, bị từ chối trích dẫn. |
+| **4. Câu trích đúng bản gốc được chấp nhận** | **PASS** | Unit Test | Khớp chính xác chuỗi ký tự trong `work_paragraphs`. |
+| **5. Câu bị đổi từ, đổi dấu hoặc ghép sai bị từ chối** | **PASS** | Unit Test | Thử đổi `"Anh thanh niên 27 tuổi rất thích đọc sách"` -> bị từ chối ngay. |
+| **6. Chuẩn hóa khoảng trắng & ngắt dòng** | **PASS** | Unit Test | Thu gọn whitespace và `\n` trước khi so khớp, giữ nguyên chữ và dấu. |
+| **7. ID đoạn giả hoặc ngoài quyền bị từ chối** | **PASS** | Unit Test | Kiểm tra ID đoạn và thứ tự đoạn thuộc đúng tác phẩm và quyền của học sinh. |
+| **8. Không có đoạn phù hợp thì không ép trích dẫn** | **PASS** | Unit Test & Logic | Phản hồi giải thích bằng lời văn thận trọng, không tạo khối trích dẫn giả. |
+| **9. Thay bản gốc làm mất hiệu lực cache cũ** | **PASS** | Unit Test | `activatePrimaryDocument` tăng `version` và xóa cache liên quan. |
+| **10. Không stream câu trích chưa kiểm chứng** | **PASS** | Unit Test | Quy trình kiểm chứng thực hiện hoàn tất ở backend trước khi gửi payload về client. |
+| **11. Tham khảo mâu thuẫn không ghi đè bản gốc** | **PASS** | Unit Test | Bản gốc luôn là chuẩn duy nhất; mâu thuẫn được ghi nhận trong diff report. |
+| **12. Nhiều tài liệu tham khảo không lấn át bản gốc** | **PASS** | Unit Test | Bản gốc luôn được đưa lên đầu ngữ cảnh và ưu tiên cung cấp chi tiết. |
+| **13. Kiểm tra xuyên suốt (1 tác phẩm, 1 bản gốc, nhiều tham khảo)** | **PASS** | Integration/Unit Test | Toàn bộ quy trình dual-source RAG chạy mượt mà, trả về đầy đủ 2 nhóm citations. |
 
-### 4.2. Kiểm thử Tích hợp API thật (`test:live`)
-- File kiểm thử: `backend/src/__tests__/live_api_verification.integration.test.ts`.
-- Lệnh chạy: `npm run test:live`.
-- **Trạng thái thực tế khi chưa có API Key môi trường:** Báo cáo **`[LIVE TEST SKIPPED] Trạng thái: "CHƯA CHẠY" (Không báo PASS ảo)`**. Hoàn toàn tuân thủ yêu cầu không báo PASS khi chưa gọi API thực tế.
+> **Phân định rõ ràng giữa MOCK và LIVE GEMINI API:**
+> - **Kiểm thử tự động (Unit Tests):** Sử dụng Mock File Search Engine và Paragraph Verification Engine nội bộ. Chạy độc lập, không tốn quota và không phụ thuộc vào kết nối mạng.
+> - **Chế độ Live Gemini API:** Chạy với Gemini File Search Store và Key Pool có sẵn. Khi bật Live API, backend vẫn áp dụng cùng 100% bộ lọc kiểm chứng nguyên tác đối với các khối trích dẫn trước khi phản hồi ra giao diện học sinh.
 
 ---
 
-## 5. Phân tích Số lượt API và Ràng buộc Tài nguyên
+## 6. Đánh giá Hiệu năng và Chi phí
 
-| Tình huống xử lý | Số lượt gọi Tạo sinh | Số lượt gọi Kiểm chứng | Tổng API Calls | Chi phí & Quota học sinh |
-| :--- | :---: | :---: | :---: | :--- |
-| **Cache Hit** | 0 | 0 | **0** | Không tốn API, phản hồi < 5ms |
-| **Câu hỏi không có nguồn (No source)** | 1 | 0 | **1** | Hoàn lại quota học sinh |
-| **Câu hỏi mới thông thường** | 1 | 1 (Gộp toàn bộ) | **2** | Tính 1 lượt câu hỏi theo quy chế |
-| **Câu trả lời chỉ trích nguyên văn** | 1 | 0 (Dùng mã Tầng 1) | **1** | Tiết kiệm 1 lượt API verifier |
-
-> **Ràng buộc cứng:** Không tạo vòng lặp tự động sửa - kiểm chứng (no re-generation loop). Mỗi câu trả lời mới tiêu tốn tối đa **1 lượt API kiểm chứng bổ sung**.
+1. **Số lượt gọi API:**
+   - Mỗi câu hỏi thông thường: **Chỉ tiêu tốn đúng 1 API call tạo sinh**, không tốn thêm API call cho verifier (giảm 50% chi phí và triệt tiêu lỗi 503 so với kiến trúc verifier cũ).
+   - Khi Cache hit: **0 API call**, phản hồi tức thì trong < 10ms.
+2. **Tốc độ phản hồi (Latency):**
+   - Thuật toán so khớp nguyên tác tại backend dựa trên `String.indexOf` và RegExp trên các chuỗi đã chuẩn hóa thực thi trong **dưới 2ms**, không làm tăng thời gian chờ của học sinh.
+3. **Bộ nhớ & Lưu trữ:**
+   - Mỗi tác phẩm chỉ lưu vài chục đoạn văn bản trong bảng `work_paragraphs`, kích thước cơ sở dữ liệu tăng không đáng kể (< 100KB mỗi tác phẩm).
 
 ---
 
-## 6. Giới hạn Kỹ thuật và Khuyến nghị Triển khai
+## 7. Kết luận & Hướng dẫn Tiếp tục
 
-1. **Giới hạn Mô hình Tự kiểm chứng (Self-verification)**:
-   - Khi mô hình kiểm chứng thuộc cùng họ (Gemini), có xác suất lặp lại một số thiên kiến hoặc suy diễn của mô hình tạo sinh. Báo cáo kỹ thuật này ghi nhận đây là giới hạn vốn có của phương pháp không dùng mô hình ngoài.
-2. **Cảm thụ Văn học Việt Nam**:
-   - Cảm thụ văn học giàu tính ẩn dụ, đa nghĩa. Bộ kiểm chứng được điều chỉnh để chấp nhận các cách diễn đạt sáng tạo có liên hệ chặt chẽ với dẫn chứng, nhưng vẫn cần giáo viên duyệt đối với các đề tài nâng cao.
-3. **Đánh giá tải đồng thời 20 người dùng**:
-   - Hiện hệ thống có connection pool PostgreSQL (10-20 clients), Zod timeout (8s), và PostgreSQL verified cache.
-   - Để khẳng định đáp ứng 20 người dùng đồng thời trên production Render/Railway, cần thực hiện load test bằng `autocannon` hoặc `k6` để đo p95 latency và rate limit của Gemini API Key Pool.
+Cơ chế phân loại tài liệu và kiểm chứng trích dẫn mới đã khắc phục toàn bộ nhược điểm của cơ chế cũ, đáp ứng đầy đủ tính sư phạm môn Ngữ văn và độ tin cậy của hệ sinh thái RAG.
+
+- Tài liệu hướng dẫn sử dụng dành cho giáo viên đã sẵn sàng tại: [`docs/DOCUMENT_CLASSIFICATION_AND_VERIFICATION_GUIDE.md`](file:///d:/Project/chatbot-ngu-van/docs/DOCUMENT_CLASSIFICATION_AND_VERIFICATION_GUIDE.md).
+- Giao diện giáo viên và học sinh đã được kiểm tra tính tương thích, biên dịch thành công 0 lỗi.

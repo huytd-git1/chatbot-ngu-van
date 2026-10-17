@@ -4,6 +4,7 @@ import { query } from '../db/pool.js';
 import { QuotaService } from '../services/quota.service.js';
 import { GeminiService } from '../services/gemini.service.js';
 import { DocumentService } from '../services/document.service.js';
+import { ParagraphService } from '../services/paragraph.service.js';
 
 const askSchema = z.object({
   workId: z.string().uuid('ID tác phẩm không hợp lệ.'),
@@ -158,49 +159,69 @@ export class StudentController {
       return;
     }
 
-    // 3. Retrieve ready documents for this work
-    const docsRes = await query<{
+    // 3. Retrieve active primary document for this work (Rule: exactly 1 active primary per work)
+    const primaryDocsRes = await query<{
       id: string;
       title: string;
-      doc_type: string;
+      version: number;
       file_search_store_name: string;
       raw_content: string | null;
     }>(
-      `SELECT id, title, doc_type, file_search_store_name, raw_content
+      `SELECT id, title, version, file_search_store_name, raw_content
        FROM documents
-       WHERE work_id = $1 AND status = 'ready'`,
+       WHERE work_id = $1 AND document_role = 'primary' AND is_active = true AND status = 'ready'
+       LIMIT 1`,
       [workId]
     );
 
-    if (docsRes.rows.length === 0) {
-      // No ready documents -> return polite refusal, record no_source (does NOT deduct student quota)
-      const refusalMsg = `Hiện tại chưa có tài liệu chính thức nào sẵn sàng cho tác phẩm "${work.title}". Em hãy báo giáo viên phụ trách cập nhật tài liệu bài học nhé!`;
+    if (primaryDocsRes.rows.length === 0) {
+      // If no primary document is active, as specified in requirement 2:
+      // "Nếu chưa có bản gốc, chưa mở chế độ hỏi đáp có trích dẫn tác phẩm."
+      const refusalMsg = `Hiện tại tác phẩm "${work.title}" chưa có văn bản tác phẩm gốc được kích hoạt và kiểm chứng. Em hãy báo giáo viên phụ trách kích hoạt văn bản gốc để mở tính năng hỏi đáp có trích dẫn tác phẩm nhé!`;
       await QuotaService.recordNoSource(req.user.id, idempotencyKey, refusalMsg);
       res.status(200).json({
         answer: refusalMsg,
         citations: [],
+        primaryCitations: [],
+        referenceCitations: [],
         isNoSource: true,
+        hasPrimaryText: false,
         toolConfigured: false,
-        message: 'Chưa có tài liệu sẵn sàng.',
+        message: 'Chưa có văn bản tác phẩm gốc được kích hoạt.',
       });
       return;
     }
 
-    // Extract unique file_search_store_names
-    const storeNames = Array.from(new Set(docsRes.rows.map(d => d.file_search_store_name)));
-    const docTitles = docsRes.rows.map(d => d.title);
-    const mockSnippets = docsRes.rows
+    const primaryDocRow = primaryDocsRes.rows[0];
+    const primaryParagraphs = await ParagraphService.getParagraphsForDocument(primaryDocRow.id);
+
+    // Retrieve active reference documents (EXCLUDE unclassified and inactive documents!)
+    const refDocsRes = await query<{
+      id: string;
+      title: string;
+      reference_type: string | null;
+      file_search_store_name: string;
+      raw_content: string | null;
+    }>(
+      `SELECT id, title, reference_type, file_search_store_name, raw_content
+       FROM documents
+       WHERE work_id = $1 AND document_role = 'reference' AND is_active = true AND status = 'ready'
+       ORDER BY created_at ASC`,
+      [workId]
+    );
+
+    const allActiveDocs = [
+      { ...primaryDocRow, doc_type: 'text_primary' },
+      ...refDocsRes.rows.map(r => ({ ...r, doc_type: r.reference_type || 'analysis' })),
+    ];
+
+    const storeNames = Array.from(new Set(allActiveDocs.map(d => d.file_search_store_name)));
+    const docTitles = allActiveDocs.map(d => d.title);
+    const mockSnippets = allActiveDocs
       .filter(d => (d.raw_content || '').trim().length > 0)
       .map(d => {
-        const typeLabel =
-          d.doc_type === 'text_primary'
-            ? 'Văn bản nguyên tác'
-            : d.doc_type === 'analysis'
-            ? 'Tài liệu phân tích chuyên sâu'
-            : d.doc_type === 'lesson_plan'
-            ? 'Giáo án bài giảng'
-            : 'Hướng dẫn hỏi đáp đọc hiểu';
-        return `[TÀI LIỆU CHÍNH THỨC: "${d.title}" | PHÂN LOẠI: ${typeLabel}]:\n${d.raw_content}`;
+        const isPri = d.id === primaryDocRow.id;
+        return `[${isPri ? 'VĂN BẢN TÁC PHẨM GỐC' : 'TÀI LIỆU THAM KHẢO & PHÂN TÍCH'}: "${d.title}"]:\n${d.raw_content}`;
       });
 
     // 4. Retrieve teacher learning settings if prep_and_review mode
@@ -230,6 +251,19 @@ export class StudentController {
         prepReviewSettings,
         authorizedDocumentTitles: docTitles,
         mockDocumentSnippets: mockSnippets,
+        primaryDoc: {
+          id: primaryDocRow.id,
+          title: primaryDocRow.title,
+          version: primaryDocRow.version,
+          rawContent: primaryDocRow.raw_content,
+          paragraphs: primaryParagraphs,
+        },
+        referenceDocs: refDocsRes.rows.map(r => ({
+          id: r.id,
+          title: r.title,
+          referenceType: r.reference_type,
+          rawContent: r.raw_content,
+        })),
         chatHistory: parse.data.history,
       });
 
@@ -239,6 +273,8 @@ export class StudentController {
         res.status(200).json({
           answer: ragResult.text,
           citations: ragResult.citations,
+          primaryCitations: ragResult.primaryCitations || [],
+          referenceCitations: ragResult.referenceCitations || [],
           isNoSource: true,
           toolConfigured: ragResult.toolConfigured,
           toolActuallyUsed: ragResult.toolActuallyUsed,
@@ -268,6 +304,8 @@ export class StudentController {
       res.status(200).json({
         answer: ragResult.text,
         citations: ragResult.citations,
+        primaryCitations: ragResult.primaryCitations || [],
+        referenceCitations: ragResult.referenceCitations || [],
         suggestions,
         isNoSource: false,
         toolConfigured: ragResult.toolConfigured,
