@@ -119,7 +119,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
     const recentHistory = messages.slice(-6).map((m) => ({
       sender: m.sender,
-      text: m.text,
+      text: m.text.length > 10000 ? m.text.substring(0, 10000) + '...' : m.text,
     }));
 
     try {
@@ -512,7 +512,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                 : `Hỏi cô về bài học "${activeWork?.title}"...`
             }
             className="flex-1 bg-[#fbf9f4] rounded-xl px-3 py-2 text-base sm:text-sm text-[#1c2530] border border-[#e8e2d5] focus:outline-none focus:ring-2 focus:ring-[#0f2942]/20 resize-none min-h-[44px] max-h-24 sm:max-h-32"
-            maxLength={1000}
+            maxLength={5000}
           />
 
           <button

@@ -7,12 +7,12 @@ import { DocumentService } from '../services/document.service.js';
 
 const askSchema = z.object({
   workId: z.string().uuid('ID tác phẩm không hợp lệ.'),
-  question: z.string().trim().min(2, 'Vui lòng nhập câu hỏi có ít nhất 2 ký tự.').max(1000, 'Câu hỏi quá dài (tối đa 1000 ký tự).'),
+  question: z.string().trim().min(2, 'Vui lòng nhập câu hỏi có ít nhất 2 ký tự.').max(5000, 'Câu hỏi quá dài (tối đa 5000 ký tự).'),
   learningMode: z.enum(['qa', 'character_analysis', 'outline', 'reading_comprehension', 'essay_feedback', 'prep_and_review']).default('qa'),
   idempotencyKey: z.string().min(8, 'Idempotency key không hợp lệ.').max(128),
   history: z.array(z.object({
     sender: z.enum(['user', 'ai']),
-    text: z.string().max(4000),
+    text: z.string().max(50000),
   })).optional().default([]),
 });
 
