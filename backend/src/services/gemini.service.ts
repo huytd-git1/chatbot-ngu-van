@@ -820,10 +820,45 @@ ${formattedHistory}
           }
 
           if (authorizedDocumentTitles.length > 0 && !fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ')) {
-            citations.push({
-              fileName: authorizedDocumentTitles[0] || 'Tài liệu học tập',
-              sourceText: mockDocumentSnippets[0] ? mockDocumentSnippets[0].substring(0, 100) + '...' : undefined,
-            });
+            const seenFiles = new Set<string>();
+            const resolvedCitations: FileCitationMeta[] = [];
+
+            // Extract any quotes (in > "...") from fullResponseText to match specific source documents
+            const blockquotes = Array.from(fullResponseText.matchAll(/>\s*"([^"]+)"/g)).map((m) => m[1].trim());
+
+            for (let i = 0; i < authorizedDocumentTitles.length; i++) {
+              const docTitle = authorizedDocumentTitles[i];
+              if (seenFiles.has(docTitle)) continue;
+
+              const snippet = mockDocumentSnippets[i] || '';
+              let matchingQuote: string | undefined = undefined;
+
+              for (const bq of blockquotes) {
+                if (bq.length >= 10 && snippet.includes(bq)) {
+                  matchingQuote = bq;
+                  break;
+                }
+              }
+
+              const cleanExcerpt =
+                matchingQuote ||
+                snippet
+                  .split('\n')
+                  .find((l) => l.trim().length > 25 && !l.startsWith('['))
+                  ?.trim() ||
+                (snippet.length > 0 ? snippet.slice(0, 150).trim() : undefined);
+
+              seenFiles.add(docTitle);
+              resolvedCitations.push({
+                fileName: docTitle,
+                sourceText: cleanExcerpt ? cleanExcerpt.slice(0, 160) : undefined,
+              });
+            }
+
+            if (resolvedCitations.length > 0) {
+              citations.length = 0;
+              citations.push(...resolvedCitations);
+            }
           }
         }
 
@@ -1063,7 +1098,15 @@ ${formattedHistory}
     return {
       text: responseText,
       hasCitations: true,
-      citations: matchedSnippets.slice(0, 2).map(m => ({ fileName: m.title, sourceText: m.text.slice(0, 120) })),
+      citations:
+        authorizedDocumentTitles.length > 0
+          ? authorizedDocumentTitles.map((title, i) => ({
+              fileName: title,
+              sourceText:
+                mockDocumentSnippets[i]?.split('\n').find((s) => s.trim().length > 20 && !s.startsWith('['))?.slice(0, 140) ||
+                excerpt.slice(0, 120),
+            }))
+          : matchedSnippets.map((m) => ({ fileName: m.title, sourceText: m.text.slice(0, 120) })),
       tokenCount: 180,
       isNoSource: false,
       toolConfigured: true,

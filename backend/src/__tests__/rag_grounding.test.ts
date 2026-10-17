@@ -98,4 +98,32 @@ Biên soạn bởi: Cô Dương
     expect(result.text).toContain('Tài liệu Cô Dương biên soạn');
     expect(result.text).toContain('tư tưởng');
   });
+
+  it('cites all authorized documents when teacher provides multiple materials for a work', async () => {
+    const doc1 = 'VĂN BẢN NGUYÊN TÁC: LẶNG LẼ SA PA\nNguyễn Thành Long\nAnh thanh niên làm việc trên đỉnh Yên Sơn.';
+    const doc2 = 'GIÁO ÁN BÀI GIẢNG: LẶNG LẼ SA PA\nPhân tích tinh thần cống hiến thầm lặng của thế hệ trẻ.';
+    const doc3 = 'TÀI LIỆU ÔN TẬP & ĐỀ CƯƠNG: LẶNG LẼ SA PA\nBộ câu hỏi đọc hiểu và hướng dẫn phân tích nhân vật.';
+
+    const result = await GeminiService.executeRagQuery({
+      workTitle: 'Lặng lẽ Sa Pa',
+      learningMode: 'qa',
+      studentQuestion: 'Ý nghĩa tư tưởng của tác phẩm Lặng lẽ Sa Pa là gì hả cô?',
+      fileSearchStoreNames: ['fileSearchStores/work_test_store'],
+      authorizedDocumentTitles: [
+        'Văn bản nguyên tác Lặng lẽ Sa Pa',
+        'Giáo án bài giảng Lặng lẽ Sa Pa',
+        'Tài liệu ôn tập & Đề cương',
+      ],
+      mockDocumentSnippets: [doc1, doc2, doc3],
+    });
+
+    expect(result.isNoSource).toBe(false);
+    expect(result.hasCitations).toBe(true);
+    expect(result.citations.length).toBe(3);
+    expect(result.citations.map((c) => c.fileName)).toEqual([
+      'Văn bản nguyên tác Lặng lẽ Sa Pa',
+      'Giáo án bài giảng Lặng lẽ Sa Pa',
+      'Tài liệu ôn tập & Đề cương',
+    ]);
+  });
 });
