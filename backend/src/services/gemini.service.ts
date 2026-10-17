@@ -245,6 +245,50 @@ export class GeminiService {
   }
 
   /**
+   * Removes an API key by 1-based index from the active pool and persists to DB
+   */
+  public static async removeKeyByIndex(index: number): Promise<void> {
+    if (index < 1 || index > this.activeApiKeys.length) {
+      throw new Error(`Chỉ số API Key không hợp lệ (#${index}).`);
+    }
+
+    const removedKey = this.activeApiKeys[index - 1];
+    this.activeApiKeys.splice(index - 1, 1);
+    this.keyCooldowns.delete(removedKey);
+    this.clientsCache.delete(removedKey);
+    this.roundRobinIndex = 0;
+
+    const newKeyString = this.activeApiKeys.length > 0 ? this.activeApiKeys.join('\n') : null;
+
+    await query(
+      `INSERT INTO ai_settings (id, api_key, updated_at)
+       VALUES ('default', $1, NOW())
+       ON CONFLICT (id) DO UPDATE
+       SET api_key = $1,
+           updated_at = NOW()`,
+      [newKeyString]
+    );
+  }
+
+  /**
+   * Clears all API keys from active pool and resets to Mock mode
+   */
+  public static async clearAllKeys(): Promise<void> {
+    this.activeApiKeys = [];
+    this.keyCooldowns.clear();
+    this.clientsCache.clear();
+    this.roundRobinIndex = 0;
+
+    await query(
+      `INSERT INTO ai_settings (id, api_key, updated_at)
+       VALUES ('default', NULL, NOW())
+       ON CONFLICT (id) DO UPDATE
+       SET api_key = NULL,
+           updated_at = NOW()`
+    );
+  }
+
+  /**
    * Helper to identify if an error is a candidate for auto-failover (429, 503, 403, network)
    */
   public static isFailoverError(err: any): boolean {

@@ -22,33 +22,34 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenLogin,
 }) => {
   return (
-    <header className="bg-white/85 backdrop-blur-md border-b border-[#e8e2d5] sticky top-0 z-30 shadow-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <header className="bg-white/90 backdrop-blur-md border-b border-[#e8e2d5] sticky top-0 z-30 shadow-xs">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
         {/* Brand */}
-        <div className="flex items-center space-x-3 cursor-pointer" onClick={() => onViewChange('student')}>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#0f2942] to-[#1e3a5f] flex items-center justify-center text-amber-300 shadow-sm">
-            <BookOpen className="w-5 h-5" />
+        <div className="flex items-center space-x-2 sm:space-x-3 cursor-pointer min-w-0 shrink" onClick={() => onViewChange('student')}>
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#0f2942] to-[#1e3a5f] flex items-center justify-center text-amber-300 shadow-sm shrink-0">
+            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-[#0f2942] tracking-tight flex items-center gap-1.5">
-              Cô Dương dạy văn dễ thương
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 border border-amber-200">
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-base lg:text-lg font-bold text-[#0f2942] tracking-tight flex items-center gap-1.5 whitespace-nowrap truncate">
+              <span className="hidden sm:inline">Cô Dương dạy văn dễ thương</span>
+              <span className="sm:hidden">Cô Dương AI</span>
+              <span className="text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
                 AI RAG
               </span>
             </h1>
-            <p className="text-xs text-slate-500 hidden sm:block">Trợ lý học tập Ngữ văn có căn cứ tài liệu chính thức</p>
+            <p className="text-[11px] text-slate-500 hidden md:block truncate">Trợ lý học tập Ngữ văn có căn cứ tài liệu chính thức</p>
           </div>
         </div>
 
         {/* Center / Right controls */}
-        <div className="flex items-center space-x-2 sm:space-x-4">
+        <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
           {user ? (
             <>
               {/* Quota Indicator for Student / Test Teacher */}
               {quota && (
                 <>
                   {/* Desktop Quota Indicator */}
-                  <div className="hidden md:flex items-center px-3 py-1 rounded-full text-xs font-medium border bg-amber-50/80 border-amber-200 text-amber-900 shadow-2xs">
+                  <div className="hidden lg:flex items-center px-3 py-1 rounded-full text-xs font-medium border bg-amber-50/80 border-amber-200 text-amber-900 shadow-2xs">
                     {quota.isUnlimited ? (
                       <span className="flex items-center gap-1 text-emerald-800 font-semibold">
                         <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
@@ -68,7 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
 
                   {/* Mobile Compact Quota Badge */}
-                  <div className="md:hidden flex items-center px-2 py-1 rounded-lg text-[11px] font-bold bg-amber-50 border border-amber-200/80 text-amber-900 shrink-0">
+                  <div className="lg:hidden flex items-center px-2 py-0.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold bg-amber-50 border border-amber-200/80 text-amber-900 shrink-0">
                     {quota.isUnlimited ? (
                       <span className="flex items-center gap-1 text-emerald-700">
                         <Sparkles className="w-3 h-3 text-emerald-600" />
@@ -77,7 +78,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ) : (
                       <span className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        <span>{quota.remaining}/{quota.limit} lượt</span>
+                        <span>{quota.remaining}/{quota.limit}</span>
                       </span>
                     )}
                   </div>
@@ -85,31 +86,33 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
 
               {/* View Switcher based on role */}
-              <div className="flex items-center bg-[#f4efe6] p-1 rounded-lg text-xs font-medium">
+              <div className="flex items-center bg-[#f4efe6] p-0.5 sm:p-1 rounded-lg text-xs font-medium shrink-0">
                 <button
                   onClick={() => onViewChange('student')}
-                  className={`px-2.5 py-1 rounded-md transition-all ${
+                  className={`px-2 sm:px-2.5 py-1 rounded-md transition-all text-[11px] sm:text-xs ${
                     currentView === 'student' ? 'bg-white text-[#0f2942] shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Góc học sinh
+                  <span className="hidden sm:inline">Góc học sinh</span>
+                  <span className="sm:hidden">Học sinh</span>
                 </button>
 
                 {(user.role === 'teacher' || user.role === 'admin') && (
                   <button
                     onClick={() => onViewChange('teacher')}
-                    className={`px-2.5 py-1 rounded-md transition-all ${
+                    className={`px-2 sm:px-2.5 py-1 rounded-md transition-all text-[11px] sm:text-xs ${
                       currentView === 'teacher' ? 'bg-white text-[#0f2942] shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Bàn giáo viên
+                    <span className="hidden sm:inline">Bàn giáo viên</span>
+                    <span className="sm:hidden">Giáo viên</span>
                   </button>
                 )}
 
                 {user.role === 'admin' && (
                   <button
                     onClick={() => onViewChange('admin')}
-                    className={`px-2.5 py-1 rounded-md transition-all ${
+                    className={`px-2 sm:px-2.5 py-1 rounded-md transition-all text-[11px] sm:text-xs ${
                       currentView === 'admin' ? 'bg-white text-[#0f2942] shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >

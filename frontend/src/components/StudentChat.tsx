@@ -3,7 +3,8 @@ import {
   Send, Sparkles, BookOpen,
   Trash2, ShieldCheck, Info, FileText, ChevronDown, ChevronUp, Loader2,
   HelpCircle, UserCheck, ListOrdered, CheckSquare, MessageSquareText, Compass,
-  MessageSquarePlus, CheckCircle2, AlertCircle
+  MessageSquarePlus, CheckCircle2, AlertCircle,
+  PanelLeft, PanelLeftClose, SlidersHorizontal, X
 } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -26,6 +27,8 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   const [isLoading, setIsLoading] = useState(false);
   const [openCitationIdx, setOpenCitationIdx] = useState<number | null>(null);
   const [docSuggestions, setDocSuggestions] = useState<string[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -227,91 +230,187 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-2 sm:px-4 py-2 sm:py-5 flex flex-col h-[calc(100dvh-4rem)] sm:h-[calc(100vh-4.75rem)] min-h-0">
-      {/* Top Banner: Work selector & Disclaimers */}
-      <div className="bg-white rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 shadow-xs border border-[#e8e2d5] mb-2 sm:mb-3 shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="p-2 sm:p-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shrink-0">
-            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-amber-800" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <label htmlFor="work-select" className="block text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Tác phẩm đang học:
-            </label>
-            <select
-              id="work-select"
-              value={selectedWorkId}
-              onChange={(e) => setSelectedWorkId(e.target.value)}
-              className="mt-0.5 block w-full sm:w-72 font-bold text-[#0f2942] text-xs sm:text-sm bg-transparent border-none focus:ring-0 cursor-pointer p-0 truncate"
+    <div className="max-w-7xl mx-auto w-full px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col min-h-0 h-[calc(100dvh-3.5rem)] sm:h-[calc(100dvh-4rem)]">
+      <div className="flex-1 flex min-h-0 gap-2 sm:gap-3 relative">
+        {/* Mobile Drawer Backdrop */}
+        {isMobileSidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 lg:hidden transition-opacity"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+        )}
+
+        {/* Sidebar: Mobile Drawer / Desktop Left Column */}
+        <aside
+          className={`
+            ${isMobileSidebarOpen
+              ? 'fixed inset-y-0 left-0 z-50 w-80 max-w-[85vw] bg-white shadow-2xl flex flex-col p-3.5 border-r border-[#e8e2d5] animate-in slide-in-from-left duration-200'
+              : isSidebarOpen
+              ? 'hidden lg:flex w-72 xl:w-80 shrink-0 bg-white rounded-2xl border border-[#e8e2d5] shadow-xs p-3.5 flex-col h-full overflow-hidden'
+              : 'hidden'
+            }
+          `}
+        >
+          {/* Sidebar Header */}
+          <div className="flex items-center justify-between pb-2.5 border-b border-[#e8e2d5] mb-3 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-amber-100 text-amber-900">
+                <BookOpen className="w-4 h-4 text-amber-800" />
+              </div>
+              <span className="font-bold text-sm text-[#0f2942]">Khóa học & Chế độ</span>
+            </div>
+
+            {/* Close button for Mobile / Collapse button for Desktop */}
+            <button
+              onClick={() => {
+                if (isMobileSidebarOpen) setIsMobileSidebarOpen(false);
+                else setIsSidebarOpen(false);
+              }}
+              title="Thu gọn thanh bên"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             >
-              {works.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.title} ({w.author} - Lớp {w.grade})
-                </option>
-              ))}
-            </select>
+              {isMobileSidebarOpen ? <X className="w-5 h-5" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
           </div>
-        </div>
 
-        {/* AI Pedagogical Disclaimer */}
-        <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-slate-600 bg-[#fbf9f4] px-2.5 py-1.5 rounded-xl border border-[#e8e2d5]/70 shrink-0">
-          <Info className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-          <span className="truncate sm:whitespace-normal">Cô trả lời chuẩn theo tài liệu giáo viên đã cấp.</span>
-        </div>
-      </div>
+          {/* Scrollable Body in Sidebar */}
+          <div className="flex-1 overflow-y-auto pr-0.5 space-y-3.5 no-scrollbar">
+            {/* Work Selector Section */}
+            <div>
+              <label htmlFor="sidebar-work-select" className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                Tác phẩm đang học:
+              </label>
+              <div className="relative">
+                <select
+                  id="sidebar-work-select"
+                  value={selectedWorkId}
+                  onChange={(e) => {
+                    setSelectedWorkId(e.target.value);
+                    setIsMobileSidebarOpen(false);
+                  }}
+                  className="w-full text-xs font-bold text-[#0f2942] bg-[#fbf9f4] border border-[#e8e2d5] rounded-xl p-2.5 focus:ring-2 focus:ring-[#0f2942]/20 cursor-pointer pr-7"
+                >
+                  {works.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.title} ({w.author} - Lớp {w.grade})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-      {/* Learning Mode Switcher: Mobile Swipeable Strip + Desktop Grid */}
-      <div className="shrink-0 mb-2 sm:mb-3">
-        {/* Mobile Horizontal Scrollable Pills */}
-        <div className="sm:hidden flex overflow-x-auto no-scrollbar gap-1.5 pb-1 -mx-2 px-2 snap-x">
-          {learningModeConfigs.map((m) => {
-            const Icon = m.icon;
-            const isSelected = learningMode === m.id;
-            return (
+              {/* AI Pedagogical Disclaimer */}
+              <div className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-900 bg-amber-50/80 p-2.5 rounded-xl border border-amber-200/70">
+                <Info className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">Cô trả lời chuẩn theo tài liệu giáo viên đã cấp.</span>
+              </div>
+            </div>
+
+            {/* Learning Mode Switcher Section */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  Chế độ học tập:
+                </label>
+                <span className="text-[10px] text-slate-400 font-medium">{learningModeConfigs.length} chế độ</span>
+              </div>
+
+              <div className="space-y-1.5">
+                {learningModeConfigs.map((m) => {
+                  const Icon = m.icon;
+                  const isSelected = learningMode === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        setLearningMode(m.id as LearningMode);
+                        setIsMobileSidebarOpen(false);
+                      }}
+                      className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-start gap-2.5 cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#0f2942] text-white border-[#0f2942] shadow-xs'
+                          : 'bg-[#fbf9f4] hover:bg-amber-50/70 text-[#1c2530] border-[#e8e2d5]'
+                      }`}
+                    >
+                      <div className={`p-1.5 rounded-lg shrink-0 ${isSelected ? 'bg-white/10 text-amber-300' : 'bg-white text-slate-600 border border-[#e8e2d5]'}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold truncate flex items-center justify-between">
+                          <span>{m.label}</span>
+                          {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+                        </div>
+                        <p className={`text-[10px] mt-0.5 line-clamp-2 leading-relaxed ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
+                          {m.desc}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Chat Area */}
+        <div className="flex-1 min-w-0 flex flex-col h-full min-h-0">
+          {/* Slim Chat Top Bar: Toggles, Active Info, Actions */}
+          <div className="bg-white rounded-xl sm:rounded-2xl p-2 sm:p-2.5 shadow-xs border border-[#e8e2d5] mb-2 shrink-0 flex items-center justify-between gap-2">
+            {/* Left side: Toggles & Title */}
+            <div className="flex items-center gap-2 min-w-0">
+              {/* Desktop Toggle Button */}
               <button
-                key={m.id}
-                onClick={() => setLearningMode(m.id as LearningMode)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap snap-start shrink-0 border transition-all ${
-                  isSelected
-                    ? 'bg-[#0f2942] text-white border-[#0f2942] shadow-xs'
-                    : 'bg-white hover:bg-amber-50/60 text-[#1c2530] border-[#e8e2d5]'
-                }`}
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                title={isSidebarOpen ? "Thu gọn thanh bên" : "Mở thanh bên"}
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] hover:bg-amber-50 text-[#0f2942] text-xs font-semibold transition-all shadow-2xs cursor-pointer"
               >
-                <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-amber-300' : 'text-slate-500'}`} />
-                <span>{m.shortLabel}</span>
+                {isSidebarOpen ? <PanelLeftClose className="w-4 h-4 text-amber-700" /> : <PanelLeft className="w-4 h-4 text-amber-700" />}
+                <span>{isSidebarOpen ? 'Thu gọn' : 'Tác phẩm'}</span>
               </button>
-            );
-          })}
-        </div>
 
-        {/* Desktop 6-Column Grid */}
-        <div className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-6 gap-2">
-          {learningModeConfigs.map((m) => {
-            const Icon = m.icon;
-            const isSelected = learningMode === m.id;
-            return (
+              {/* Mobile Drawer Trigger */}
               <button
-                key={m.id}
-                onClick={() => setLearningMode(m.id as LearningMode)}
-                title={m.desc}
-                className={`p-2 rounded-xl text-left border transition-all flex flex-col justify-between ${
-                  isSelected
-                    ? 'bg-[#0f2942] text-white border-[#0f2942] shadow-xs'
-                    : 'bg-white hover:bg-amber-50/50 text-[#1c2530] border-[#e8e2d5]'
-                }`}
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="lg:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 text-xs font-bold shadow-2xs cursor-pointer"
               >
-                <div className="flex items-center gap-1.5">
-                  <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-amber-300' : 'text-slate-500'}`} />
-                  <span className="text-xs font-bold truncate">{m.label}</span>
+                <SlidersHorizontal className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+                <span className="truncate max-w-[130px] sm:max-w-[220px]">{activeWork?.title || 'Chọn tác phẩm'}</span>
+              </button>
+
+              {/* Work & Mode Info Display */}
+              <div className="hidden sm:flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#0f2942] truncate">
+                  <BookOpen className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span className="truncate">{activeWork?.title}</span>
+                  {activeWork?.author && (
+                    <span className="text-slate-400 font-normal hidden xl:inline">({activeWork.author} - Lớp {activeWork.grade})</span>
+                  )}
                 </div>
-                <span className={`text-[10px] truncate mt-1 ${isSelected ? 'text-amber-200' : 'text-slate-400'}`}>
-                  {m.desc.split(':')[0]}
+                <span className="text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-900 border border-amber-200 shrink-0">
+                  {learningModeConfigs.find(m => m.id === learningMode)?.shortLabel}
                 </span>
+              </div>
+            </div>
+
+            {/* Right side: Session Actions */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <button
+                onClick={handleNewSession}
+                title="Bắt đầu phiên trò chuyện mới (làm mới khung chat)"
+                className="flex items-center gap-1 text-[#0f2942] hover:text-amber-800 font-semibold transition-colors px-2 py-1 rounded-xl hover:bg-amber-50 text-xs cursor-pointer"
+              >
+                <MessageSquarePlus className="w-3.5 h-3.5 text-amber-700" />
+                <span className="hidden sm:inline">Phiên mới</span>
               </button>
-            );
-          })}
-        </div>
-      </div>
+              <button
+                onClick={handleClearHistory}
+                title="Xóa tin nhắn trong phiên này"
+                className="flex items-center gap-1 text-slate-400 hover:text-red-600 transition-colors p-1.5 sm:px-2 sm:py-1 rounded-xl hover:bg-red-50 text-xs cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Xóa</span>
+              </button>
+            </div>
+          </div>
 
       {/* Chat Messages Scroll Area */}
       <div className="flex-1 min-h-0 bg-white rounded-xl sm:rounded-2xl p-3 sm:p-5 overflow-y-auto shadow-xs border border-[#e8e2d5] space-y-3 sm:space-y-4">
@@ -534,35 +633,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
       )}
 
       {/* Bottom Action & Input Area */}
-      <div className="mt-1.5 shrink-0 bg-white rounded-xl sm:rounded-2xl p-2 sm:p-3 shadow-xs border border-[#e8e2d5]">
-        {/* Helper Line: Current Mode & Clear History */}
-        <div className="flex items-center justify-between px-1 mb-1.5 text-[10px] sm:text-[11px] text-slate-500">
-          <div className="flex items-center gap-1.5 truncate">
-            <span>Chế độ:</span>
-            <strong className="text-[#0f2942] truncate font-semibold">
-              {learningModeConfigs.find(m => m.id === learningMode)?.label}
-            </strong>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <button
-              onClick={handleNewSession}
-              title="Bắt đầu phiên trò chuyện mới (làm mới khung chat)"
-              className="flex items-center gap-1 text-[#0f2942] hover:text-amber-800 font-semibold transition-colors px-2 py-0.5 rounded-md hover:bg-amber-50"
-            >
-              <MessageSquarePlus className="w-3.5 h-3.5 text-amber-700" />
-              <span>Phiên mới</span>
-            </button>
-            <button
-              onClick={handleClearHistory}
-              title="Xóa tin nhắn trong phiên này"
-              className="flex items-center gap-1 text-slate-400 hover:text-red-600 transition-colors px-1.5 py-0.5 rounded-md hover:bg-red-50"
-            >
-              <Trash2 className="w-3 h-3" />
-              <span className="hidden sm:inline">Xóa</span>
-            </button>
-          </div>
-        </div>
-
+      <div className="mt-1.5 shrink-0 bg-white rounded-xl sm:rounded-2xl p-2 sm:p-2.5 shadow-xs border border-[#e8e2d5]">
         {/* Input Form with Responsive Touch Area */}
         <form
           onSubmit={(e) => {
@@ -599,11 +670,13 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
             type="submit"
             disabled={isLoading || !question.trim()}
             aria-label="Gửi câu hỏi"
-            className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 disabled:cursor-not-allowed transition-all font-semibold flex items-center justify-center shrink-0 shadow-xs active:scale-95"
+            className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 disabled:cursor-not-allowed transition-all font-semibold flex items-center justify-center shrink-0 shadow-xs active:scale-95 cursor-pointer"
           >
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         </form>
+      </div>
+        </div>
       </div>
     </div>
   );

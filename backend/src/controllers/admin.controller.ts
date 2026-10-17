@@ -452,4 +452,56 @@ export class AdminController {
     const result = await GeminiService.testConnection(apiKey, modelName);
     res.status(result.success ? 200 : 400).json(result);
   }
+
+  /**
+   * Delete a specific API key from the active pool by index
+   */
+  static async deleteAiKey(req: Request, res: Response): Promise<void> {
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index)) {
+      res.status(400).json({ error: 'Chỉ số API Key không hợp lệ.' });
+      return;
+    }
+
+    try {
+      await GeminiService.removeKeyByIndex(index);
+
+      // Log admin action
+      await query(
+        `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
+         VALUES ($1, 'DELETE_AI_KEY', 'system', 'gemini_ai', $2, $3)`,
+        [req.user?.id || null, JSON.stringify({ deletedKeyIndex: index }), req.ip]
+      );
+
+      res.status(200).json({
+        message: `Đã xóa API Key #${index} thành công.`,
+        config: GeminiService.getAiConfigSummary(),
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Không thể xóa API Key.' });
+    }
+  }
+
+  /**
+   * Clear all API keys from the pool (reset to Mock mode)
+   */
+  static async clearAllAiKeys(req: Request, res: Response): Promise<void> {
+    try {
+      await GeminiService.clearAllKeys();
+
+      // Log admin action
+      await query(
+        `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
+         VALUES ($1, 'CLEAR_ALL_AI_KEYS', 'system', 'gemini_ai', '{}', $2)`,
+        [req.user?.id || null, req.ip]
+      );
+
+      res.status(200).json({
+        message: 'Đã xóa toàn bộ Gemini API Keys. Hệ thống đã chuyển về chế độ Giả lập kiểm thử (Mock Mode).',
+        config: GeminiService.getAiConfigSummary(),
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Không thể xóa danh sách API Keys.' });
+    }
+  }
 }
