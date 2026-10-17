@@ -416,8 +416,13 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
       <div className="flex-1 min-h-0 bg-white rounded-xl sm:rounded-2xl p-3 sm:p-5 overflow-y-auto shadow-xs border border-[#e8e2d5] space-y-3 sm:space-y-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-full text-center py-6 sm:py-10 px-2 sm:px-4">
-            <div className="w-13 h-13 sm:w-16 sm:h-16 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-800 mb-2.5 sm:mb-3 shadow-inner">
-              <Sparkles className="w-6 h-6 sm:w-8 sm:h-8 text-amber-700" />
+            <div className="relative mb-3">
+              <img
+                src="/co-duong-avatar.png"
+                alt="Cô Dương AI"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-3 border-amber-300 shadow-md ring-4 ring-amber-100/70"
+              />
+              <span className="absolute bottom-0.5 right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white shadow-2xs" title="Sẵn sàng trợ giúp" />
             </div>
             <h3 className="text-base sm:text-lg font-bold text-[#0f2942]">Chào em! Cô Dương đây</h3>
             <p className="text-xs sm:text-sm text-slate-600 max-w-lg mt-1 mb-4 sm:mb-6">
@@ -472,135 +477,152 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               key={msg.id || idx}
               className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
             >
-              <div className="flex items-center gap-1.5 mb-1 px-1">
+              <div className={`flex items-center gap-1.5 mb-1 px-1 ${msg.sender === 'ai' ? 'ml-9 sm:ml-10' : ''}`}>
                 <span className="text-[11px] font-semibold text-slate-500">
                   {msg.sender === 'user' ? 'Em' : 'Cô Dương AI'}
                 </span>
                 <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
               </div>
 
-              <div
-                className={`max-w-[92%] sm:max-w-[80%] rounded-2xl p-3 sm:p-4 text-xs sm:text-sm leading-relaxed ${
-                  msg.sender === 'user'
-                    ? 'bg-[#0f2942] text-white rounded-tr-xs shadow-xs'
-                    : msg.isNoSource
-                    ? 'bg-amber-50/90 text-amber-950 border border-amber-200 rounded-tl-xs'
-                    : 'bg-[#fbf9f4] text-[#1c2530] border border-[#e8e2d5] rounded-tl-xs shadow-2xs'
-                }`}
-              >
-                {/* Message Body with Safe Sanitized Markdown */}
+              <div className={`flex items-start gap-2 max-w-[94%] sm:max-w-[85%] ${msg.sender === 'user' ? 'justify-end' : ''}`}>
+                {msg.sender === 'ai' && (
+                  <img
+                    src="/co-duong-avatar.png"
+                    alt="Cô Dương AI"
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border-2 border-amber-300 shadow-2xs shrink-0 mt-0.5"
+                  />
+                )}
+
                 <div
-                  className="prose-cu-duong text-xs sm:text-sm"
-                  dangerouslySetInnerHTML={{
-                    __html: DOMPurify.sanitize(marked.parse(msg.text) as string),
-                  }}
-                />
+                  className={`flex-1 min-w-0 rounded-2xl p-3 sm:p-4 text-xs sm:text-sm leading-relaxed ${
+                    msg.sender === 'user'
+                      ? 'bg-[#0f2942] text-white rounded-tr-xs shadow-xs'
+                      : msg.isNoSource
+                      ? 'bg-amber-50/90 text-amber-950 border border-amber-200 rounded-tl-xs'
+                      : 'bg-[#fbf9f4] text-[#1c2530] border border-[#e8e2d5] rounded-tl-xs shadow-2xs'
+                  }`}
+                >
+                  {/* Message Body with Safe Sanitized Markdown */}
+                  <div
+                    className="prose-cu-duong text-xs sm:text-sm"
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(marked.parse(msg.text) as string),
+                    }}
+                  />
 
-                {/* Grounding Citations Panel */}
-                {msg.citations && msg.citations.length > 0 && (
-                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/60">
-                    <button
-                      onClick={() => setOpenCitationIdx(openCitationIdx === idx ? null : idx)}
-                      className="flex items-center gap-1.5 text-xs font-semibold text-[#0f2942] hover:text-amber-800 transition-colors"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Căn cứ tài liệu giáo viên ({msg.citations.length})</span>
-                      {openCitationIdx === idx ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    </button>
+                  {/* Grounding Citations Panel */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-200/60">
+                      <button
+                        onClick={() => setOpenCitationIdx(openCitationIdx === idx ? null : idx)}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-[#0f2942] hover:text-amber-800 transition-colors"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Căn cứ tài liệu giáo viên ({msg.citations.length})</span>
+                        {openCitationIdx === idx ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      </button>
 
-                    {openCitationIdx === idx && (
-                      <div className="mt-2 space-y-1.5">
-                        {/* Source Files */}
-                        {msg.citations.map((c, cIdx) => (
-                          <div
-                            key={cIdx}
-                            className="bg-white/90 p-2 sm:p-2.5 rounded-xl border border-emerald-100 text-[11px] sm:text-xs text-slate-700"
-                          >
-                            <div className="font-semibold text-emerald-900 flex items-center gap-1 truncate">
-                              <FileText className="w-3 h-3 text-emerald-700 shrink-0" />
-                              <span className="truncate">{c.fileName}</span>
+                      {openCitationIdx === idx && (
+                        <div className="mt-2 space-y-1.5">
+                          {/* Source Files */}
+                          {msg.citations.map((c, cIdx) => (
+                            <div
+                              key={cIdx}
+                              className="bg-white/90 p-2 sm:p-2.5 rounded-xl border border-emerald-100 text-[11px] sm:text-xs text-slate-700"
+                            >
+                              <div className="font-semibold text-emerald-900 flex items-center gap-1 truncate">
+                                <FileText className="w-3 h-3 text-emerald-700 shrink-0" />
+                                <span className="truncate">{c.fileName}</span>
+                              </div>
+                              {c.sourceText && (
+                                <p className="mt-1 text-[10px] sm:text-[11px] text-slate-600 italic bg-slate-50 p-1.5 rounded-lg border-l-2 border-emerald-500 break-words">
+                                  "{c.sourceText}"
+                                </p>
+                              )}
                             </div>
-                            {c.sourceText && (
-                              <p className="mt-1 text-[10px] sm:text-[11px] text-slate-600 italic bg-slate-50 p-1.5 rounded-lg border-l-2 border-emerald-500 break-words">
-                                "{c.sourceText}"
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                          ))}
 
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Dynamic Follow-up Suggestions directly from reference contents */}
+                  {msg.sender === 'ai' && msg.suggestions && msg.suggestions.length > 0 && (
+                    <div className="mt-2.5 pt-2 border-t border-slate-200/60">
+                      <div className="text-[11px] font-semibold text-[#0f2942] flex items-center gap-1.5 mb-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Gợi ý hỏi tiếp trực tiếp từ dẫn chứng & tài liệu:</span>
                       </div>
-                    )}
-                  </div>
-                )}
+                      <div className="flex flex-wrap gap-1.5">
+                        {msg.suggestions.map((sug, sIdx) => (
+                          <button
+                            key={sIdx}
+                            onClick={() => handleSend(sug)}
+                            className="text-[11px] sm:text-xs text-left px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100/90 text-amber-950 border border-amber-200 hover:border-amber-400 transition-all shadow-2xs flex items-start gap-1.5"
+                          >
+                            <span className="text-amber-700 font-bold shrink-0">✦</span>
+                            <span>{sug}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                {/* Dynamic Follow-up Suggestions directly from reference contents */}
-                {msg.sender === 'ai' && msg.suggestions && msg.suggestions.length > 0 && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-200/60">
-                    <div className="text-[11px] font-semibold text-[#0f2942] flex items-center gap-1.5 mb-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span>Gợi ý hỏi tiếp trực tiếp từ dẫn chứng & tài liệu:</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {msg.suggestions.map((sug, sIdx) => (
-                        <button
-                          key={sIdx}
-                          onClick={() => handleSend(sug)}
-                          className="text-[11px] sm:text-xs text-left px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100/90 text-amber-950 border border-amber-200 hover:border-amber-400 transition-all shadow-2xs flex items-start gap-1.5"
-                        >
-                          <span className="text-amber-700 font-bold shrink-0">✦</span>
-                          <span>{sug}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  {/* AI Model & Grounding Badges */}
+                  {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
+                    <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-1 text-[10px] sm:text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        {msg.isLiveAi ? (
+                          <span className="flex items-center gap-1 text-emerald-700 font-medium">
+                            <Sparkles className="w-3 h-3 text-amber-500" />
+                            Google Gemini ({msg.modelUsed || 'Live'})
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-amber-900/80 font-medium bg-amber-50/80 px-2 py-0.5 rounded-md border border-amber-200/60" title="Chế độ phân tích tài liệu bài học trực tiếp">
+                            <BookOpen className="w-3 h-3 text-amber-700" />
+                            {msg.modelUsed || 'Tài liệu giáo viên (Ngoại tuyến)'}
+                          </span>
+                        )}
+                        {msg.isCached && (
+                          <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                            Cache hit
+                          </span>
+                        )}
+                      </div>
 
-                {/* AI Model & Grounding Badges */}
-                {msg.sender === 'ai' && !msg.text.startsWith('Lỗi:') && (
-                  <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-1 text-[10px] sm:text-[11px]">
-                    <div className="flex items-center gap-1.5">
-                      {msg.isLiveAi ? (
-                        <span className="flex items-center gap-1 text-emerald-700 font-medium">
-                          <Sparkles className="w-3 h-3 text-amber-500" />
-                          Google Gemini ({msg.modelUsed || 'Live'})
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-amber-900/80 font-medium bg-amber-50/80 px-2 py-0.5 rounded-md border border-amber-200/60" title="Chế độ phân tích tài liệu bài học trực tiếp">
-                          <BookOpen className="w-3 h-3 text-amber-700" />
-                          {msg.modelUsed || 'Tài liệu giáo viên (Ngoại tuyến)'}
-                        </span>
-                      )}
-                      {msg.isCached && (
-                        <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
-                          Cache hit
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {msg.isNoSource ? (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 text-amber-600" />
+                            Chưa đủ căn cứ
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Chuẩn tài liệu giáo viên ✓
+                          </span>
+                        )}
+                      </div>
                     </div>
-
-                    <div className="flex items-center gap-1">
-                      {msg.isNoSource ? (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3 text-amber-600" />
-                          Chưa đủ căn cứ
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                          Chuẩn tài liệu giáo viên ✓
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           ))
         )}
 
         {isLoading && (
-          <div className="flex items-start gap-2">
-            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-amber-100 flex items-center justify-center text-amber-900 shrink-0">
-              <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin text-amber-800" />
+          <div className="flex items-start gap-2 max-w-[94%] sm:max-w-[85%]">
+            <div className="relative shrink-0">
+              <img
+                src="/co-duong-avatar.png"
+                alt="Cô Dương AI"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border-2 border-amber-300 shadow-2xs mt-0.5"
+              />
+              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-amber-500 rounded-full flex items-center justify-center text-white ring-2 ring-white">
+                <Loader2 className="w-2 h-2 animate-spin" />
+              </span>
             </div>
             <div className="bg-[#fbf9f4] p-2.5 sm:p-3 rounded-2xl rounded-tl-xs border border-[#e8e2d5] text-xs text-slate-600 flex items-center gap-2">
               <span>Cô đang tra cứu tài liệu bài học và suy ngẫm câu trả lời...</span>

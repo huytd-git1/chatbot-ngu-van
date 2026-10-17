@@ -26,8 +26,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
         {/* Brand */}
         <div className="flex items-center space-x-2 sm:space-x-3 cursor-pointer min-w-0 shrink" onClick={() => onViewChange('student')}>
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#0f2942] to-[#1e3a5f] flex items-center justify-center text-amber-300 shadow-sm shrink-0">
-            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl overflow-hidden border border-amber-300 shadow-xs shrink-0 ring-2 ring-amber-100">
+            <img src="/co-duong-avatar.png" alt="Cô Dương" className="w-full h-full object-cover" />
           </div>
           <div className="min-w-0">
             <h1 className="text-sm sm:text-base lg:text-lg font-bold text-[#0f2942] tracking-tight flex items-center gap-1.5 whitespace-nowrap truncate">
