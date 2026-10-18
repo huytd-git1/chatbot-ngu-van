@@ -4,7 +4,7 @@ import {
   CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu,
   Layers, RefreshCw, Zap, ShieldCheck,
   Trash2, Users, GraduationCap, Plus, BookOpen, Lock, Unlock, KeyRound, X, Award,
-  BarChart3, RotateCcw, Activity, TrendingUp, Coins, Clock
+  BarChart3, RotateCcw, Activity, TrendingUp, Coins, Clock, ShieldAlert, ArrowRight
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
 import type { KeyPoolItem, TokenStatsSummary } from '../types.js';
@@ -1195,11 +1195,63 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
 
-            {/* Smart Failover Explanation Banner */}
-            <div className="p-3.5 bg-sky-50 border border-sky-200/80 rounded-xl flex items-start gap-3">
-              <Zap className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-              <div className="text-[11px] text-sky-900 leading-relaxed">
-                <span className="font-bold">Cơ chế Tự động Dự phòng & Cân bằng tải (Failover Pool):</span> Hệ thống tự động phân bổ lượt hỏi đáp xoay vòng (Round-Robin) giữa các API Key. Khi một Key bất kỳ bị cạn Quota (lỗi 429) hoặc máy chủ Google bị quá tải/trễ mạng (lỗi 503), hệ thống tự động tạm dừng key đó trong 60 giây và ngay lập tức chuyển sang Key dự phòng kế tiếp để học sinh không bao giờ bị gián đoạn.
+            {/* Google ToS & Architecture Best Practices Section */}
+            <div className="space-y-3">
+              {/* Policy Warning & Best Practice Recommendation */}
+              <div className="p-4 bg-amber-50/90 border border-amber-200/90 rounded-2xl flex items-start gap-3 shadow-2xs">
+                <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-950 space-y-1 leading-relaxed">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                    Lưu ý về Chính sách Google (ToS Compliance) & Khuyến nghị vận hành chuẩn:
+                  </div>
+                  <p className="text-[11px] text-amber-900/90">
+                    Việc tạo nhiều tài khoản Google khác nhau để thu thập API Key miễn phí (Free Tier) vi phạm điều khoản dịch vụ của Google về hành vi lách hạn ngạch (<em>circumvent usage limits</em>). Hệ thống bảo vệ của Google có thể giám sát dải IP, thiết bị và lưu lượng truy cập để khóa đồng loạt quyền truy cập API (lỗi 403 ToS disabled).
+                  </p>
+                  <p className="text-[11px] text-amber-900 font-semibold pt-1">
+                    👉 <strong>Giải pháp chuẩn (Best Practice):</strong> Sử dụng 1 tài khoản Google chính thống kích hoạt thanh toán Pay-as-you-go (chi phí các dòng Gemini Flash cực kỳ tiết kiệm, chỉ khoảng ~0.10$/1M token) HOẶC sử dụng bộ đôi cơ chế <strong>Luân phiên Cấp độ Mô hình (Model Fallback)</strong> và <strong>Hàng đợi Thử lại Thích ứng (Adaptive Queue Backoff)</strong> đã được cấu hình tự động dưới đây.
+                  </p>
+                </div>
+              </div>
+
+              {/* Architecture 2-Pillars Cards: Model Fallback + Backoff Queue */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Pillar 1: Model Fallback Cascade */}
+                <div className="p-3.5 bg-sky-50/80 border border-sky-200/80 rounded-2xl text-xs space-y-2 shadow-2xs">
+                  <div className="flex items-center gap-2 text-sky-950 font-bold">
+                    <Zap className="w-4 h-4 text-sky-600" />
+                    <span>A. Luân chuyển Cấp độ Mô hình (Model Fallback)</span>
+                  </div>
+                  <p className="text-[11px] text-sky-900/85 leading-relaxed">
+                    Mỗi mô hình trên Google AI Studio có hạn mức RPM/TPM độc lập. Khi mô hình phân tích chuyên sâu gặp lỗi quá tải (429/503), hệ thống tự động hạ cấp tầng mô hình nhẹ hơn trên cùng API Key:
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono font-bold text-sky-950">
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-3.8-flash</span>
+                    <ArrowRight className="w-3 h-3 text-sky-400" />
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-3.6-flash</span>
+                    <ArrowRight className="w-3 h-3 text-sky-400" />
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-2.5-flash</span>
+                    <ArrowRight className="w-3 h-3 text-sky-400" />
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs text-emerald-800">2.5-flash-lite</span>
+                  </div>
+                </div>
+
+                {/* Pillar 2: Adaptive Backoff & Queue Throttling */}
+                <div className="p-3.5 bg-teal-50/80 border border-teal-200/80 rounded-2xl text-xs space-y-2 shadow-2xs">
+                  <div className="flex items-center gap-2 text-teal-950 font-bold">
+                    <Clock className="w-4 h-4 text-teal-600" />
+                    <span>B. Hàng đợi Điều tiết & Thử lại (Backoff & Queue)</span>
+                  </div>
+                  <p className="text-[11px] text-teal-900/85 leading-relaxed">
+                    Hạn mức Free Tier của Google phục hồi liên tục theo từng phút (15 RPM). Hệ thống tích hợp hàng đợi giãn cách tối thiểu 350ms và tự động thử lại sau 2–2.8 giây (kèm Jitter ngẫu nhiên) khi chạm ngưỡng phút, giúp học sinh không bao giờ bị đứt gãy câu hỏi.
+                  </p>
+                  <div className="flex items-center gap-2 pt-1 text-[10px] text-teal-800 font-medium">
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Giãn cách: 350ms</span>
+                    <span>•</span>
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Thử lại: 2.0s - 2.8s Backoff</span>
+                    <span>•</span>
+                    <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Chuyển Key: 60s làm mát</span>
+                  </div>
+                </div>
               </div>
             </div>
 

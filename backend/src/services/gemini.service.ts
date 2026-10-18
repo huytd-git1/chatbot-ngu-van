@@ -135,6 +135,12 @@ export class GeminiService {
       description: 'Mô hình ổn định, tối ưu chi phí, hiệu năng cao',
     },
     {
+      id: 'gemini-2.5-flash-lite',
+      name: 'Gemini 2.5 Flash-Lite',
+      description: 'Mô hình siêu nhẹ, tiết kiệm tài nguyên, hạn mức RPM cao và phản hồi tức thì',
+      badge: 'Tải cao',
+    },
+    {
       id: 'gemini-1.5-flash',
       name: 'Gemini 1.5 Flash',
       description: 'Hạ tầng toàn cầu lớn, tương thích mọi tài khoản',
@@ -626,6 +632,39 @@ export class GeminiService {
       msg.includes('fetch failed') ||
       msg.includes('deadline exceeded')
     );
+  }
+
+  private static lastRequestTimestamp: number = 0;
+  private static readonly MIN_REQUEST_INTERVAL_MS: number = 350;
+
+  /**
+   * Promise-based sleep utility
+   */
+  public static async sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Adaptive Throttler: spaces out requests to avoid burst rate-limiting (sudden 429 spike)
+   */
+  public static async throttleRequest(): Promise<void> {
+    const now = Date.now();
+    const elapsed = now - this.lastRequestTimestamp;
+    if (elapsed < this.MIN_REQUEST_INTERVAL_MS) {
+      await this.sleep(this.MIN_REQUEST_INTERVAL_MS - elapsed);
+    }
+    this.lastRequestTimestamp = Date.now();
+  }
+
+  /**
+   * Identifies if an error is specifically a transient rate limit (429 / Resource Exhausted) that recovers in 2-5s
+   */
+  public static isRateLimitError(err: any): boolean {
+    if (!err) return false;
+    const status = err.status || err.statusCode || err.response?.status;
+    if (status === 429) return true;
+    const msg = (err.message || '').toLowerCase();
+    return msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('rate limit');
   }
 
   /**
@@ -1170,48 +1209,77 @@ ${formattedHistory}
    - Xưng "cô", gọi "em". Ấm áp, tận tâm, truyền cảm hứng văn học.
 `;
 
+          // Multi-Tier Model Fallback Cascade (Best Practice: 3.8-flash -> 3.6-flash -> 2.5-flash -> 2.5-flash-lite -> 1.5-flash)
           const candidateModels = [
             this.activeModel,
+            'gemini-3.8-flash',
             'gemini-3.6-flash',
             'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
             'gemini-1.5-flash',
           ].filter((m, i, arr) => arr.indexOf(m) === i);
 
           let lastModelErr: any = null;
           for (const candidateModel of candidateModels) {
-            try {
-              const response = await client.models.generateContent({
-                model: candidateModel,
-                contents: groundingPrompt,
-                config: {
-                  systemInstruction,
-                  temperature: 0.7,
-                },
-              });
+            let attempt = 0;
+            const maxAttemptsPerModel = 2;
 
-              if (response.text) {
-                fullResponseText = response.text;
-                const usageMeta = (response as any).usageMetadata;
-                const pTokens = usageMeta?.promptTokenCount ?? Math.ceil(groundingPrompt.length / 4);
-                const oTokens = usageMeta?.candidatesTokenCount ?? Math.ceil(fullResponseText.length / 4);
-                tokenCount = usageMeta?.totalTokenCount ?? (pTokens + oTokens);
-                toolActuallyUsed = true;
-                apiSucceeded = true;
-                actualModelUsed = candidateModel;
-                await this.recordKeyUsage({
-                  key: currentKey,
-                  promptTokens: pTokens,
-                  outputTokens: oTokens,
-                  success: true,
+            while (attempt < maxAttemptsPerModel) {
+              attempt++;
+              try {
+                // Throttle requests slightly to prevent sudden burst 429
+                await this.throttleRequest();
+
+                const response = await client.models.generateContent({
+                  model: candidateModel,
+                  contents: groundingPrompt,
+                  config: {
+                    systemInstruction,
+                    temperature: 0.7,
+                  },
                 });
-                break;
+
+                if (response.text) {
+                  fullResponseText = response.text;
+                  const usageMeta = (response as any).usageMetadata;
+                  const pTokens = usageMeta?.promptTokenCount ?? Math.ceil(groundingPrompt.length / 4);
+                  const oTokens = usageMeta?.candidatesTokenCount ?? Math.ceil(fullResponseText.length / 4);
+                  tokenCount = usageMeta?.totalTokenCount ?? (pTokens + oTokens);
+                  toolActuallyUsed = true;
+                  apiSucceeded = true;
+                  actualModelUsed = candidateModel;
+                  await this.recordKeyUsage({
+                    key: currentKey,
+                    promptTokens: pTokens,
+                    outputTokens: oTokens,
+                    success: true,
+                  });
+                  break; // Successful response, break retry loop
+                }
+              } catch (modelErr: any) {
+                lastModelErr = modelErr;
+                const isRateLimit = this.isRateLimitError(modelErr);
+
+                // If transient 429 rate limit (quota per minute), wait 2-2.8s with jitter and retry once before cascading
+                if (isRateLimit && attempt < maxAttemptsPerModel) {
+                  const backoffDelay = 2000 + Math.floor(Math.random() * 800);
+                  console.warn(
+                    `[GeminiService] Rate limit (429) on model ${candidateModel}. Pausing ${backoffDelay}ms for minute quota replenishment before retry (${attempt}/${maxAttemptsPerModel})...`
+                  );
+                  await this.sleep(backoffDelay);
+                  continue;
+                }
+
+                // If rate limit persists or model is overloaded (503), cascade down to the next lighter model in hierarchy!
+                console.warn(
+                  `[GeminiService] Key ${this.maskKey(currentKey)} Model ${candidateModel} failed: ${modelErr.message}. Cascading down to next tier model in fallback hierarchy...`
+                );
+                break; // Break retry loop, advance to next candidateModel
               }
-            } catch (modelErr: any) {
-              console.warn(`[GeminiService] Key ${this.maskKey(currentKey)} Model ${candidateModel} failed:`, modelErr.message);
-              lastModelErr = modelErr;
-              if (this.isFailoverError(modelErr)) {
-                break;
-              }
+            }
+
+            if (apiSucceeded) {
+              break; // Got successful response, exit model cascade loop
             }
           }
 
