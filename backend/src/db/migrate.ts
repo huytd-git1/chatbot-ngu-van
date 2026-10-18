@@ -273,6 +273,23 @@ export async function runMigrations() {
     );
     CREATE INDEX IF NOT EXISTS idx_paragraphs_doc ON work_paragraphs(document_id);
     CREATE INDEX IF NOT EXISTS idx_paragraphs_work_ver ON work_paragraphs(work_id, version);
+    `,
+    `
+    CREATE TABLE IF NOT EXISTS api_key_usage (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      key_hash VARCHAR(64) NOT NULL UNIQUE,
+      masked_key VARCHAR(60) NOT NULL,
+      total_tokens BIGINT DEFAULT 0,
+      prompt_tokens BIGINT DEFAULT 0,
+      output_tokens BIGINT DEFAULT 0,
+      request_count INTEGER DEFAULT 0,
+      success_count INTEGER DEFAULT 0,
+      error_count INTEGER DEFAULT 0,
+      last_used_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_key_usage_hash ON api_key_usage(key_hash);
+    ALTER TABLE chat_requests ADD COLUMN IF NOT EXISTS api_key_masked VARCHAR(60);
     `
   ];
 

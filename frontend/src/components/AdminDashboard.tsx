@@ -3,9 +3,11 @@ import {
   Power, Settings, History, Sparkles,
   CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu,
   Layers, RefreshCw, Zap, ShieldCheck,
-  Trash2, Users, GraduationCap, Plus, BookOpen, Lock, Unlock, KeyRound, X, Award
+  Trash2, Users, GraduationCap, Plus, BookOpen, Lock, Unlock, KeyRound, X, Award,
+  BarChart3, RotateCcw, Activity, TrendingUp, Coins, Clock
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
+import type { KeyPoolItem, TokenStatsSummary } from '../types.js';
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'teachers' | 'classes' | 'ai' | 'system' | 'logs'>('teachers');
@@ -42,12 +44,10 @@ export const AdminDashboard: React.FC = () => {
   const [hasSavedKey, setHasSavedKey] = useState(false);
   const [keyCount, setKeyCount] = useState(0);
   const [activeKeyCount, setActiveKeyCount] = useState(0);
-  const [keyPool, setKeyPool] = useState<Array<{
-    index: number;
-    maskedKey: string;
-    isCooldown: boolean;
-    cooldownSecondsLeft: number;
-  }>>([]);
+  const [keyPool, setKeyPool] = useState<KeyPoolItem[]>([]);
+  const [tokenStats, setTokenStats] = useState<TokenStatsSummary | null>(null);
+  const [refreshingStats, setRefreshingStats] = useState(false);
+  const [resettingStats, setResettingStats] = useState(false);
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const [supportedModels, setSupportedModels] = useState<any[]>([]);
   const [isLiveAiConfigured, setIsLiveAiConfigured] = useState(false);
@@ -134,6 +134,7 @@ export const AdminDashboard: React.FC = () => {
       setKeyCount(data.keyCount || 0);
       setActiveKeyCount(data.activeKeyCount || 0);
       setKeyPool(data.keyPool || []);
+      if (data.tokenStats) setTokenStats(data.tokenStats);
       if (data.activeModel) setSelectedModel(data.activeModel);
       if (data.supportedModels) setSupportedModels(data.supportedModels);
     } catch {}
@@ -388,6 +389,51 @@ export const AdminDashboard: React.FC = () => {
       loadSettings();
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleRefreshAiSettings = async () => {
+    setRefreshingStats(true);
+    try {
+      await loadAiSettings();
+    } finally {
+      setRefreshingStats(false);
+    }
+  };
+
+  const handleResetTokenStats = async () => {
+    if (!confirm('Bạn có chắc chắn muốn ĐẶT LẠI toàn bộ thống kê tiêu thụ token về 0 không?\n\nThao tác này sẽ làm sạch số liệu tích lũy của toàn bộ các API Key (thường thực hiện vào đầu tháng hoặc khi thay mới dàn Key).')) return;
+    setResettingStats(true);
+    try {
+      const res = await apiRequest('/api/admin/ai-settings/reset-token-stats', { method: 'POST' });
+      alert(res.message);
+      if (res.config) {
+        if (res.config.tokenStats) setTokenStats(res.config.tokenStats);
+        if (res.config.keyPool) setKeyPool(res.config.keyPool);
+      } else {
+        loadAiSettings();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Không thể đặt lại thống kê token.');
+    } finally {
+      setResettingStats(false);
+    }
+  };
+
+  const formatDateTime = (iso?: string | null) => {
+    if (!iso) return 'Chưa có lượt gọi';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    } catch {
+      return iso;
     }
   };
 
@@ -889,6 +935,122 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
+          {/* Token Consumption & API Performance Dashboard */}
+          <div className="rounded-2xl border border-slate-200/80 bg-linear-to-br from-slate-50 via-white to-sky-50/30 p-5 space-y-4 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-700 shadow-2xs">
+                  <BarChart3 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900 tracking-wide uppercase flex items-center gap-2">
+                    Thống Kê Tiêu Thụ Token & Tải Hệ Thống
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Theo dõi lượng token tiêu thụ theo thời gian thực của từng API Key và toàn bộ hệ thống
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRefreshAiSettings}
+                  disabled={refreshingStats}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-60"
+                  title="Tải lại số liệu thống kê mới nhất"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${refreshingStats ? 'animate-spin text-indigo-600' : 'text-slate-500'}`} />
+                  <span>{refreshingStats ? 'Đang tải...' : 'Làm mới'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetTokenStats}
+                  disabled={resettingStats}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100/80 rounded-xl border border-red-200/80 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-60"
+                  title="Đặt lại bộ đếm token về 0"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${resettingStats ? 'animate-spin' : ''}`} />
+                  <span>{resettingStats ? 'Đang xóa...' : 'Đặt lại thống kê'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 4 Summary KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Total Tokens */}
+              <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-[11px] font-medium">Tổng Token Đã Dùng</span>
+                  <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <Coins className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+                <div className="text-xl font-extrabold text-slate-900 font-mono tracking-tight">
+                  {(tokenStats?.totalTokens ?? 0).toLocaleString('vi-VN')}
+                </div>
+                <div className="text-[10px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-100">
+                  <span title="Prompt (Đầu vào)">In: {(tokenStats?.totalPromptTokens ?? 0).toLocaleString('vi-VN')}</span>
+                  <span className="text-slate-300">•</span>
+                  <span title="Output (Đầu ra)">Out: {(tokenStats?.totalOutputTokens ?? 0).toLocaleString('vi-VN')}</span>
+                </div>
+              </div>
+
+              {/* Total Requests */}
+              <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-[11px] font-medium">Lượt Yêu Cầu Phục Vụ</span>
+                  <div className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <Activity className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+                <div className="text-xl font-extrabold text-emerald-900 font-mono tracking-tight">
+                  {(tokenStats?.totalRequests ?? 0).toLocaleString('vi-VN')}
+                </div>
+                <div className="text-[10px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-100">
+                  <span className="text-emerald-700 font-medium">✓ {(tokenStats?.totalSuccessRequests ?? 0).toLocaleString('vi-VN')} thành công</span>
+                  {tokenStats?.totalErrorRequests ? (
+                    <span className="text-red-600 font-medium">⚠ {tokenStats.totalErrorRequests} lỗi</span>
+                  ) : (
+                    <span className="text-slate-400">0 lỗi</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Average Tokens per request */}
+              <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-[11px] font-medium">Token TB / Lượt Hỏi</span>
+                  <div className="w-6 h-6 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+                <div className="text-xl font-extrabold text-sky-900 font-mono tracking-tight">
+                  {(tokenStats?.avgTokensPerRequest ?? 0).toLocaleString('vi-VN')}
+                </div>
+                <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-100 truncate">
+                  ~{Math.round((tokenStats?.avgTokensPerRequest ?? 0) * 0.75)} từ ngữ tiếng Việt
+                </div>
+              </div>
+
+              {/* Pool Health */}
+              <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span className="text-[11px] font-medium">Trạng Thái API Keys</span>
+                  <div className="w-6 h-6 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
+                    <Layers className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+                <div className="text-xl font-extrabold text-teal-900 font-mono tracking-tight">
+                  {activeKeyCount} <span className="text-xs font-normal text-slate-500">/ {keyCount} sẵn sàng</span>
+                </div>
+                <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                  {isLiveAiConfigured ? 'Hoạt động liên tục (Failover)' : 'Chế độ giả lập (Mock)'}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {saveAiMsg && (
             <div className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
               saveAiMsg.type === 'success'
@@ -939,40 +1101,92 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Key Pool List Badges */}
+                {/* Key Pool List with Per-Key Token Consumption */}
                 {keyPool.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-emerald-200/60">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-emerald-200/60">
                     {keyPool.map((k) => (
                       <div
                         key={k.index}
-                        className="flex items-center justify-between p-2 rounded-xl bg-white/90 border border-emerald-200/80 text-xs shadow-2xs gap-2"
+                        className="p-3.5 rounded-2xl bg-white/95 border border-emerald-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-emerald-300 hover:shadow-xs"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold flex items-center justify-center shrink-0">
-                            #{k.index}
-                          </span>
-                          <span className="font-mono text-emerald-950 font-semibold truncate text-[11px]">
-                            {k.maskedKey}
-                          </span>
+                        {/* Header: Index, Masked Key, Status, Delete */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-5 h-5 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-bold flex items-center justify-center shrink-0">
+                              #{k.index}
+                            </span>
+                            <span className="font-mono text-emerald-950 font-bold truncate text-[11px] bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/80">
+                              {k.maskedKey}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {k.isCooldown ? (
+                              <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shrink-0">
+                                <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Làm mát ({k.cooldownSecondsLeft}s)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold shrink-0">
+                                Sẵn sàng
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteKey(k.index, k.maskedKey)}
+                              title={`Xóa API Key #${k.index}`}
+                              className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {k.isCooldown ? (
-                            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shrink-0">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Làm mát ({k.cooldownSecondsLeft}s)
+
+                        {/* Token Consumption & Usage Stats for this Key */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[11px]">
+                          <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
+                            <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                              <Coins className="w-3 h-3 text-indigo-500" />
+                              Token Tiêu Thụ
+                            </div>
+                            <div className="font-mono font-bold text-slate-900 text-xs">
+                              {(k.totalTokens ?? 0).toLocaleString('vi-VN')}
+                            </div>
+                            <div className="text-[9px] text-slate-400 flex items-center gap-1">
+                              <span>In: {(k.promptTokens ?? 0).toLocaleString('vi-VN')}</span>
+                              <span>•</span>
+                              <span>Out: {(k.outputTokens ?? 0).toLocaleString('vi-VN')}</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
+                            <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                              <Activity className="w-3 h-3 text-emerald-500" />
+                              Số Lượt Yêu Cầu
+                            </div>
+                            <div className="font-mono font-bold text-slate-900 text-xs">
+                              {k.requestCount ?? 0} <span className="text-[10px] font-normal text-slate-500">lượt</span>
+                            </div>
+                            <div className="text-[9px] text-slate-400 flex items-center gap-1">
+                              <span className="text-emerald-600 font-medium">{k.successCount ?? 0} ok</span>
+                              {k.errorCount ? <span className="text-red-500 font-medium">• {k.errorCount} lỗi</span> : null}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Load share percentage & Last used at */}
+                        <div className="space-y-1 pt-1">
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                            <span>Tỷ lệ tiêu thụ: <strong className="text-emerald-700">{k.percentShare ?? 0}%</strong></span>
+                            <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                              <Clock className="w-2.5 h-2.5" />
+                              {formatDateTime(k.lastUsedAt)}
                             </span>
-                          ) : (
-                            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold shrink-0">
-                              Sẵn sàng
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteKey(k.index, k.maskedKey)}
-                            title={`Xóa API Key #${k.index}`}
-                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="bg-linear-to-r from-emerald-500 to-teal-600 h-1.5 rounded-full transition-all duration-500"
+                              style={{ width: `${Math.min(100, Math.max(0, k.percentShare ?? 0))}%` }}
+                            />
+                          </div>
                         </div>
                       </div>
                     ))}

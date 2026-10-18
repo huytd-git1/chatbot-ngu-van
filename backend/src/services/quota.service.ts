@@ -269,7 +269,8 @@ export class QuotaService {
     responseText: string,
     citationsMeta: any,
     tokenCount: number,
-    verificationMeta?: any
+    verificationMeta?: any,
+    apiKeyMasked?: string
   ): Promise<void> {
     const dateVn = this.getVietnamDateString();
 
@@ -290,7 +291,8 @@ export class QuotaService {
            citations_meta = $1,
            response_text = $2,
            token_count = $3,
-           verification_meta = $5
+           verification_meta = $5,
+           api_key_masked = COALESCE($6, api_key_masked)
        WHERE idempotency_key = $4`,
       [
         JSON.stringify(citationsMeta),
@@ -298,6 +300,7 @@ export class QuotaService {
         tokenCount,
         idempotencyKey,
         verificationMeta ? JSON.stringify(verificationMeta) : null,
+        apiKeyMasked || null,
       ]
     );
   }

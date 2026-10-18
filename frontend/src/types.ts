@@ -149,3 +149,30 @@ export interface ChatMessage {
 
 export type LearningMode = 'qa' | 'character_analysis' | 'outline' | 'reading_comprehension' | 'essay_feedback' | 'prep_and_review';
 
+export interface TokenStatsSummary {
+  totalTokens: number;
+  totalPromptTokens: number;
+  totalOutputTokens: number;
+  totalRequests: number;
+  totalSuccessRequests: number;
+  totalErrorRequests: number;
+  avgTokensPerRequest: number;
+  activeKeysCount: number;
+  historicalKeysCount?: number;
+}
+
+export interface KeyPoolItem {
+  index: number;
+  maskedKey: string;
+  isCooldown: boolean;
+  cooldownSecondsLeft: number;
+  totalTokens: number;
+  promptTokens: number;
+  outputTokens: number;
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  lastUsedAt: string | null;
+  percentShare: number;
+}
+

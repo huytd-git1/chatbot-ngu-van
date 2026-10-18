@@ -62,4 +62,81 @@ describe('Gemini Multi-API-Key Pool & Auto-Failover', () => {
     expect(summary.hasApiKey).toBe(false);
     expect(summary.isLiveConfigured).toBe(false);
   });
+
+  it('tracks token consumption for individual API keys and calculates system-wide totals & percentages', async () => {
+    await GeminiService.resetTokenUsageStats();
+
+    const key1 = 'AIzaSyTokenTestKey1_1111111111';
+    const key2 = 'AIzaSyTokenTestKey2_2222222222';
+
+    await GeminiService.updateAiConfig({
+      apiKey: `${key1}\n${key2}`,
+    });
+
+    // Record usage for key 1: 300 prompt tokens, 700 output tokens = 1000 tokens
+    await GeminiService.recordKeyUsage({
+      key: key1,
+      promptTokens: 300,
+      outputTokens: 700,
+      success: true,
+    });
+
+    // Record usage for key 2: 600 prompt tokens, 1400 output tokens = 2000 tokens
+    await GeminiService.recordKeyUsage({
+      key: key2,
+      promptTokens: 600,
+      outputTokens: 1400,
+      success: true,
+    });
+
+    // Record one failed attempt on key 1 (e.g. rate limit error)
+    await GeminiService.recordKeyUsage({
+      key: key1,
+      promptTokens: 0,
+      outputTokens: 0,
+      success: false,
+    });
+
+    const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
+    const summary = GeminiService.getAiConfigSummary(keyUsageMap, tokenStats);
+
+    // Verify system-wide totals
+    expect(tokenStats.totalTokens).toBe(3000);
+    expect(tokenStats.totalPromptTokens).toBe(900);
+    expect(tokenStats.totalOutputTokens).toBe(2100);
+    expect(tokenStats.totalRequests).toBe(3);
+    expect(tokenStats.totalSuccessRequests).toBe(2);
+    expect(tokenStats.totalErrorRequests).toBe(1);
+    expect(tokenStats.avgTokensPerRequest).toBe(1000);
+
+    // Verify individual key 1 stats
+    const k1Stats = summary.keyPool.find((k) => k.maskedKey === GeminiService.maskKey(key1));
+    expect(k1Stats).toBeDefined();
+    expect(k1Stats?.totalTokens).toBe(1000);
+    expect(k1Stats?.promptTokens).toBe(300);
+    expect(k1Stats?.outputTokens).toBe(700);
+    expect(k1Stats?.requestCount).toBe(2);
+    expect(k1Stats?.successCount).toBe(1);
+    expect(k1Stats?.errorCount).toBe(1);
+    // Key 1 is 1000/3000 = 33.3%
+    expect(k1Stats?.percentShare).toBe(33.3);
+
+    // Verify individual key 2 stats
+    const k2Stats = summary.keyPool.find((k) => k.maskedKey === GeminiService.maskKey(key2));
+    expect(k2Stats).toBeDefined();
+    expect(k2Stats?.totalTokens).toBe(2000);
+    expect(k2Stats?.promptTokens).toBe(600);
+    expect(k2Stats?.outputTokens).toBe(1400);
+    expect(k2Stats?.requestCount).toBe(1);
+    expect(k2Stats?.successCount).toBe(1);
+    expect(k2Stats?.errorCount).toBe(0);
+    // Key 2 is 2000/3000 = 66.7%
+    expect(k2Stats?.percentShare).toBe(66.7);
+
+    // Test Reset Token Usage
+    await GeminiService.resetTokenUsageStats();
+    const afterReset = await GeminiService.getKeyUsageStats();
+    expect(afterReset.tokenStats.totalTokens).toBe(0);
+    expect(afterReset.tokenStats.totalRequests).toBe(0);
+  });
 });

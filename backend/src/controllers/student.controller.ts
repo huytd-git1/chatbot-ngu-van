@@ -290,7 +290,9 @@ export class StudentController {
         idempotencyKey,
         ragResult.text,
         ragResult.citations,
-        ragResult.tokenCount
+        ragResult.tokenCount,
+        undefined,
+        ragResult.apiKeyMasked
       );
 
       // Generate follow-up suggestions directly derived from the citations and answer

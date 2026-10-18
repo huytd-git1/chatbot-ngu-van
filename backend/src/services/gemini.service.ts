@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { env } from '../config/env.js';
 
@@ -32,6 +33,7 @@ export interface RagResult {
   primaryCitations?: PrimaryCitationMeta[];
   referenceCitations?: ReferenceCitationMeta[];
   tokenCount: number;
+  apiKeyMasked?: string;
   isNoSource: boolean;
   toolConfigured: boolean;
   toolActuallyUsed: boolean;
@@ -53,6 +55,26 @@ export interface KeyHealthStatus {
   cooldownSecondsLeft: number;
   lastTestedStatus?: 'ready' | 'quota_exceeded' | 'unavailable' | 'error';
   lastResponseTimeMs?: number;
+  totalTokens: number;
+  promptTokens: number;
+  outputTokens: number;
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  lastUsedAt: string | null;
+  percentShare: number;
+}
+
+export interface TokenStatsSummary {
+  totalTokens: number;
+  totalPromptTokens: number;
+  totalOutputTokens: number;
+  totalRequests: number;
+  totalSuccessRequests: number;
+  totalErrorRequests: number;
+  avgTokensPerRequest: number;
+  activeKeysCount: number;
+  historicalKeysCount?: number;
 }
 
 export interface KeyTestResult {
@@ -83,6 +105,16 @@ export class GeminiService {
   private static clientsCache: Map<string, GoogleGenAI> = new Map();
   private static activeModel: string = env.GEMINI_MODEL || 'gemini-3.8-flash';
   private static activeEmbeddingModel: string = env.GEMINI_EMBEDDING_MODEL || 'models/gemini-embedding-2';
+
+  private static keyUsageMemoryMap: Map<string, {
+    totalTokens: number;
+    promptTokens: number;
+    outputTokens: number;
+    requestCount: number;
+    successCount: number;
+    errorCount: number;
+    lastUsedAt: string | null;
+  }> = new Map();
 
   public static readonly SUPPORTED_MODELS: SupportedModel[] = [
     {
@@ -170,9 +202,226 @@ export class GeminiService {
   }
 
   /**
+   * Hashes an API key using SHA-256 for private key tracking and usage metrics
+   */
+  public static hashKey(key: string): string {
+    return crypto.createHash('sha256').update(key.trim()).digest('hex');
+  }
+
+  /**
+   * Records token usage for a specific API key (In-Memory + Database UPSERT)
+   */
+  public static async recordKeyUsage(params: {
+    key: string;
+    promptTokens?: number;
+    outputTokens?: number;
+    success: boolean;
+  }): Promise<void> {
+    const { key, promptTokens = 0, outputTokens = 0, success } = params;
+    const totalTokens = promptTokens + outputTokens;
+    const keyHash = this.hashKey(key);
+    const masked = this.maskKey(key);
+    const nowIso = new Date().toISOString();
+
+    // 1. Update in-memory tracker immediately
+    const existing = this.keyUsageMemoryMap.get(keyHash) || {
+      totalTokens: 0,
+      promptTokens: 0,
+      outputTokens: 0,
+      requestCount: 0,
+      successCount: 0,
+      errorCount: 0,
+      lastUsedAt: null,
+    };
+
+    existing.totalTokens += totalTokens;
+    existing.promptTokens += promptTokens;
+    existing.outputTokens += outputTokens;
+    existing.requestCount += 1;
+    if (success) {
+      existing.successCount += 1;
+    } else {
+      existing.errorCount += 1;
+    }
+    existing.lastUsedAt = nowIso;
+    this.keyUsageMemoryMap.set(keyHash, existing);
+
+    // 2. Persist to DB table api_key_usage
+    try {
+      await query(
+        `INSERT INTO api_key_usage (
+           key_hash, masked_key, total_tokens, prompt_tokens, output_tokens,
+           request_count, success_count, error_count, last_used_at, created_at
+         )
+         VALUES ($1, $2, $3, $4, $5, 1, $6, $7, NOW(), NOW())
+         ON CONFLICT (key_hash) DO UPDATE
+         SET masked_key = EXCLUDED.masked_key,
+             total_tokens = api_key_usage.total_tokens + EXCLUDED.total_tokens,
+             prompt_tokens = api_key_usage.prompt_tokens + EXCLUDED.prompt_tokens,
+             output_tokens = api_key_usage.output_tokens + EXCLUDED.output_tokens,
+             request_count = api_key_usage.request_count + 1,
+             success_count = api_key_usage.success_count + EXCLUDED.success_count,
+             error_count = api_key_usage.error_count + EXCLUDED.error_count,
+             last_used_at = NOW()`,
+        [
+          keyHash,
+          masked,
+          totalTokens,
+          promptTokens,
+          outputTokens,
+          success ? 1 : 0,
+          success ? 0 : 1,
+        ]
+      );
+    } catch (dbErr) {
+      console.warn('[GeminiService] Failed to persist key usage to DB:', dbErr);
+    }
+  }
+
+  /**
+   * Retrieves detailed usage statistics across all API keys and total system tokens
+   */
+  public static async getKeyUsageStats(): Promise<{
+    keyUsageMap: Map<string, {
+      totalTokens: number;
+      promptTokens: number;
+      outputTokens: number;
+      requestCount: number;
+      successCount: number;
+      errorCount: number;
+      lastUsedAt: string | null;
+    }>;
+    tokenStats: TokenStatsSummary;
+  }> {
+    const keyUsageMap = new Map<string, {
+      totalTokens: number;
+      promptTokens: number;
+      outputTokens: number;
+      requestCount: number;
+      successCount: number;
+      errorCount: number;
+      lastUsedAt: string | null;
+    }>();
+
+    // 1. Populate from memory map first
+    for (const [hash, data] of this.keyUsageMemoryMap.entries()) {
+      keyUsageMap.set(hash, { ...data });
+    }
+
+    // 2. Query from database table
+    try {
+      const { rows } = await query<{
+        key_hash: string;
+        masked_key: string;
+        total_tokens: string | number;
+        prompt_tokens: string | number;
+        output_tokens: string | number;
+        request_count: number;
+        success_count: number;
+        error_count: number;
+        last_used_at: Date | string | null;
+      }>(`SELECT key_hash, masked_key, total_tokens, prompt_tokens, output_tokens, request_count, success_count, error_count, last_used_at FROM api_key_usage`);
+
+      for (const row of rows) {
+        const total = Number(row.total_tokens) || 0;
+        const prompt = Number(row.prompt_tokens) || 0;
+        const output = Number(row.output_tokens) || 0;
+        const reqCount = Number(row.request_count) || 0;
+        const succCount = Number(row.success_count) || 0;
+        const errCount = Number(row.error_count) || 0;
+        const lastUsed = row.last_used_at ? new Date(row.last_used_at).toISOString() : null;
+
+        const mem = keyUsageMap.get(row.key_hash);
+        if (!mem) {
+          keyUsageMap.set(row.key_hash, {
+            totalTokens: total,
+            promptTokens: prompt,
+            outputTokens: output,
+            requestCount: reqCount,
+            successCount: succCount,
+            errorCount: errCount,
+            lastUsedAt: lastUsed,
+          });
+        } else {
+          mem.totalTokens = Math.max(mem.totalTokens, total);
+          mem.promptTokens = Math.max(mem.promptTokens, prompt);
+          mem.outputTokens = Math.max(mem.outputTokens, output);
+          mem.requestCount = Math.max(mem.requestCount, reqCount);
+          mem.successCount = Math.max(mem.successCount, succCount);
+          mem.errorCount = Math.max(mem.errorCount, errCount);
+          if (lastUsed && (!mem.lastUsedAt || new Date(lastUsed) > new Date(mem.lastUsedAt))) {
+            mem.lastUsedAt = lastUsed;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[GeminiService] Could not read api_key_usage table, relying on memory stats:', err);
+    }
+
+    // 3. Compute overall system token stats
+    let totalTokens = 0;
+    let totalPromptTokens = 0;
+    let totalOutputTokens = 0;
+    let totalRequests = 0;
+    let totalSuccessRequests = 0;
+    let totalErrorRequests = 0;
+
+    for (const data of keyUsageMap.values()) {
+      totalTokens += data.totalTokens;
+      totalPromptTokens += data.promptTokens;
+      totalOutputTokens += data.outputTokens;
+      totalRequests += data.requestCount;
+      totalSuccessRequests += data.successCount;
+      totalErrorRequests += data.errorCount;
+    }
+
+    const avgTokensPerRequest = totalRequests > 0 ? Math.round(totalTokens / totalRequests) : 0;
+    const now = Date.now();
+    const activeKeysCount = this.activeApiKeys.filter((k) => (this.keyCooldowns.get(k) || 0) <= now).length;
+
+    const tokenStats: TokenStatsSummary = {
+      totalTokens,
+      totalPromptTokens,
+      totalOutputTokens,
+      totalRequests,
+      totalSuccessRequests,
+      totalErrorRequests,
+      avgTokensPerRequest,
+      activeKeysCount,
+      historicalKeysCount: keyUsageMap.size,
+    };
+
+    return { keyUsageMap, tokenStats };
+  }
+
+  /**
+   * Resets all token usage metrics in memory and database
+   */
+  public static async resetTokenUsageStats(): Promise<void> {
+    this.keyUsageMemoryMap.clear();
+    try {
+      await query(`TRUNCATE TABLE api_key_usage`);
+    } catch (err) {
+      console.warn('[GeminiService] Could not truncate api_key_usage table:', err);
+      await query(`DELETE FROM api_key_usage`);
+    }
+  }
+
+  /**
    * Gets a diagnostic summary of the current AI configuration for Admin UI
    */
-  public static getAiConfigSummary() {
+  public static getAiConfigSummary(
+    cachedUsageMap?: Map<string, {
+      totalTokens: number;
+      promptTokens: number;
+      outputTokens: number;
+      requestCount: number;
+      successCount: number;
+      errorCount: number;
+      lastUsedAt: string | null;
+    }>,
+    cachedTokenStats?: TokenStatsSummary
+  ) {
     const isLive = this.isLiveApiConfigured();
     const now = Date.now();
 
@@ -183,15 +432,45 @@ export class GeminiService {
       }
     }
 
+    const usageMap = cachedUsageMap || this.keyUsageMemoryMap;
+
+    // Calculate overall total tokens across active pool if tokenStats not precomputed
+    let overallTokens = cachedTokenStats?.totalTokens ?? 0;
+    if (!cachedTokenStats) {
+      for (const key of this.activeApiKeys) {
+        const u = usageMap.get(this.hashKey(key));
+        if (u) overallTokens += u.totalTokens;
+      }
+    }
+
     const maskedKeys: KeyHealthStatus[] = this.activeApiKeys.map((key, idx) => {
       const cooldownExp = this.keyCooldowns.get(key) || 0;
       const isCooldown = cooldownExp > now;
       const cooldownSecondsLeft = isCooldown ? Math.ceil((cooldownExp - now) / 1000) : 0;
+      const u = usageMap.get(this.hashKey(key));
+
+      const totalTokens = u?.totalTokens ?? 0;
+      const promptTokens = u?.promptTokens ?? 0;
+      const outputTokens = u?.outputTokens ?? 0;
+      const requestCount = u?.requestCount ?? 0;
+      const successCount = u?.successCount ?? 0;
+      const errorCount = u?.errorCount ?? 0;
+      const lastUsedAt = u?.lastUsedAt ?? null;
+      const percentShare = overallTokens > 0 ? Math.round((totalTokens / overallTokens) * 1000) / 10 : 0;
+
       return {
         index: idx + 1,
         maskedKey: this.maskKey(key),
         isCooldown,
         cooldownSecondsLeft,
+        totalTokens,
+        promptTokens,
+        outputTokens,
+        requestCount,
+        successCount,
+        errorCount,
+        lastUsedAt,
+        percentShare,
       };
     });
 
@@ -203,6 +482,21 @@ export class GeminiService {
       maskedKeySummary = `${this.maskKey(this.activeApiKeys[0])} (+${this.activeApiKeys.length - 1} keys dự phòng)`;
     }
 
+    const tokenStats: TokenStatsSummary = cachedTokenStats || {
+      totalTokens: overallTokens,
+      totalPromptTokens: maskedKeys.reduce((acc, k) => acc + k.promptTokens, 0),
+      totalOutputTokens: maskedKeys.reduce((acc, k) => acc + k.outputTokens, 0),
+      totalRequests: maskedKeys.reduce((acc, k) => acc + k.requestCount, 0),
+      totalSuccessRequests: maskedKeys.reduce((acc, k) => acc + k.successCount, 0),
+      totalErrorRequests: maskedKeys.reduce((acc, k) => acc + k.errorCount, 0),
+      avgTokensPerRequest:
+        maskedKeys.reduce((acc, k) => acc + k.requestCount, 0) > 0
+          ? Math.round(overallTokens / maskedKeys.reduce((acc, k) => acc + k.requestCount, 0))
+          : 0,
+      activeKeysCount: activeKeyCount,
+      historicalKeysCount: usageMap.size,
+    };
+
     return {
       isLiveConfigured: isLive,
       activeModel: this.activeModel,
@@ -213,6 +507,7 @@ export class GeminiService {
       activeKeyCount,
       keyPool: maskedKeys,
       supportedModels: this.SUPPORTED_MODELS,
+      tokenStats,
     };
   }
 
@@ -812,8 +1107,16 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
             }
 
             if (fullResponseText) {
-              tokenCount = (interaction as any).usage?.total_tokens ?? Math.ceil((studentQuestion.length + fullResponseText.length) / 4);
+              const pTokens = (interaction as any).usage?.prompt_tokens ?? Math.ceil(studentQuestion.length / 4);
+              const oTokens = (interaction as any).usage?.candidates_tokens ?? Math.ceil(fullResponseText.length / 4);
+              tokenCount = (interaction as any).usage?.total_tokens ?? (pTokens + oTokens);
               apiSucceeded = true;
+              await this.recordKeyUsage({
+                key: currentKey,
+                promptTokens: pTokens,
+                outputTokens: oTokens,
+                success: true,
+              });
             }
           } catch (interactionsErr) {
             console.warn('[GeminiService] Interactions API failed, proceeding to Direct Context Grounding:', interactionsErr);
@@ -888,10 +1191,19 @@ ${formattedHistory}
 
               if (response.text) {
                 fullResponseText = response.text;
-                tokenCount = Math.ceil((studentQuestion.length + fullResponseText.length) / 4);
+                const usageMeta = (response as any).usageMetadata;
+                const pTokens = usageMeta?.promptTokenCount ?? Math.ceil(groundingPrompt.length / 4);
+                const oTokens = usageMeta?.candidatesTokenCount ?? Math.ceil(fullResponseText.length / 4);
+                tokenCount = usageMeta?.totalTokenCount ?? (pTokens + oTokens);
                 toolActuallyUsed = true;
                 apiSucceeded = true;
                 actualModelUsed = candidateModel;
+                await this.recordKeyUsage({
+                  key: currentKey,
+                  promptTokens: pTokens,
+                  outputTokens: oTokens,
+                  success: true,
+                });
                 break;
               }
             } catch (modelErr: any) {
@@ -991,6 +1303,7 @@ ${formattedHistory}
             primaryCitations: [],
             referenceCitations: [],
             tokenCount,
+            apiKeyMasked: this.maskKey(currentKey),
             isNoSource: true,
             toolConfigured: fileSearchStoreNames.length > 0,
             toolActuallyUsed,
@@ -1006,6 +1319,7 @@ ${formattedHistory}
           primaryCitations,
           referenceCitations,
           tokenCount,
+          apiKeyMasked: this.maskKey(currentKey),
           isNoSource,
           toolConfigured: fileSearchStoreNames.length > 0,
           toolActuallyUsed,
@@ -1017,6 +1331,13 @@ ${formattedHistory}
         console.warn(
           `[GeminiService] API Key #${keyIdx + 1} (${this.maskKey(currentKey)}) encountered error: ${keyErr.message}`
         );
+
+        await this.recordKeyUsage({
+          key: currentKey,
+          promptTokens: 0,
+          outputTokens: 0,
+          success: false,
+        });
 
         if (this.isFailoverError(keyErr)) {
           this.markKeyCooldown(currentKey, 60000);

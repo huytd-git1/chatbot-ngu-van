@@ -29,5 +29,6 @@ adminRouter.put('/ai-settings', AdminController.updateAiSettings);
 adminRouter.post('/ai-settings/test', AdminController.testAiConnection);
 adminRouter.delete('/ai-settings/keys/:index', AdminController.deleteAiKey);
 adminRouter.delete('/ai-settings/keys', AdminController.clearAllAiKeys);
+adminRouter.post('/ai-settings/reset-token-stats', AdminController.resetAiTokenStats);
 
 adminRouter.get('/audit-logs', AdminController.getAuditLogs);

@@ -398,7 +398,8 @@ export class AdminController {
    * Get Gemini AI Configuration
    */
   static async getAiSettings(req: Request, res: Response): Promise<void> {
-    const summary = GeminiService.getAiConfigSummary();
+    const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
+    const summary = GeminiService.getAiConfigSummary(keyUsageMap, tokenStats);
     res.status(200).json(summary);
   }
 
@@ -438,9 +439,10 @@ export class AdminController {
       ]
     );
 
+    const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
     res.status(200).json({
       message: 'Đã cập nhật cấu hình Google Gemini AI thành công.',
-      config: GeminiService.getAiConfigSummary(),
+      config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
     });
   }
 
@@ -473,9 +475,10 @@ export class AdminController {
         [req.user?.id || null, JSON.stringify({ deletedKeyIndex: index }), req.ip]
       );
 
+      const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
       res.status(200).json({
         message: `Đã xóa API Key #${index} thành công.`,
-        config: GeminiService.getAiConfigSummary(),
+        config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Không thể xóa API Key.' });
@@ -496,12 +499,37 @@ export class AdminController {
         [req.user?.id || null, req.ip]
       );
 
+      const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
       res.status(200).json({
         message: 'Đã xóa toàn bộ Gemini API Keys. Hệ thống đã chuyển về chế độ Giả lập kiểm thử (Mock Mode).',
-        config: GeminiService.getAiConfigSummary(),
+        config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Không thể xóa danh sách API Keys.' });
+    }
+  }
+
+  /**
+   * Reset all token usage statistics
+   */
+  static async resetAiTokenStats(req: Request, res: Response): Promise<void> {
+    try {
+      await GeminiService.resetTokenUsageStats();
+
+      // Log admin action
+      await query(
+        `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
+         VALUES ($1, 'RESET_AI_TOKEN_STATS', 'system', 'gemini_ai', '{}', $2)`,
+        [req.user?.id || null, req.ip]
+      );
+
+      const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
+      res.status(200).json({
+        message: 'Đã đặt lại toàn bộ thống kê tiêu thụ token thành công.',
+        config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Không thể đặt lại thống kê token.' });
     }
   }
 }
