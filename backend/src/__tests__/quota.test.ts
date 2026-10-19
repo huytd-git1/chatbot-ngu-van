@@ -141,4 +141,24 @@ describe('Quota Engine & Anti-abuse', () => {
     );
     expect(rows[0].success_count).toBeGreaterThanOrEqual(1);
   });
+
+  it('exempts admin from daily quota limit, kill switch, and system cap', async () => {
+    const aRes = await query<UserRow>(
+      `INSERT INTO users (username, role, password_hash, full_name)
+       VALUES ('quota_admin_test_${Date.now()}', 'admin', 'fake_hash', 'Quản Trị Viên Quota')
+       RETURNING *`
+    );
+    const adminUser = aRes.rows[0];
+
+    const info = await QuotaService.getUserQuotaInfo(adminUser);
+    expect(info.isUnlimited).toBe(true);
+    expect(info.remaining).toBe(999999);
+    expect(info.limit).toBe(999999);
+    expect(info.isKillSwitchActive).toBe(false);
+    expect(info.systemCapReached).toBe(false);
+
+    const idempKey = `admin_idemp_${Date.now()}`;
+    const res = await QuotaService.reserveQuota(adminUser, sampleWorkId, 'Admin kiểm tra câu hỏi', 'qa', idempKey);
+    expect(res.allowed).toBe(true);
+  });
 });

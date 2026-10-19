@@ -120,12 +120,12 @@ export class QuotaService {
     const dateVn = this.getVietnamDateString();
     const { isKillSwitchActive, systemCapReached } = await this.checkSystemStatus(dateVn);
 
-    // If teacher_test, unlimited individual quota
-    const isUnlimited = user.is_test_teacher;
+    // If admin or teacher_test, unlimited individual quota
+    const isUnlimited = user.role === 'admin' || !!user.is_test_teacher;
 
     const baseLimit = await this.getEffectiveLimit(user.id);
     const extra = await this.getExtraGrants(user.id, dateVn);
-    const totalLimit = baseLimit + extra;
+    const totalLimit = isUnlimited ? 999999 : baseLimit + extra;
 
     const usageRes = await query(
       `SELECT success_count, reserved_count FROM daily_usage
@@ -144,8 +144,8 @@ export class QuotaService {
       remaining,
       extraGranted: extra,
       isUnlimited,
-      systemCapReached,
-      isKillSwitchActive,
+      systemCapReached: isUnlimited ? false : systemCapReached,
+      isKillSwitchActive: isUnlimited ? false : isKillSwitchActive,
     };
   }
 
@@ -200,17 +200,20 @@ export class QuotaService {
       }
     }
 
-    // 2. Check system-wide kill switch and hard cap
+    // 2. Check system-wide kill switch and hard cap (admins are exempt for testing & diagnostics)
+    const isAdmin = user.role === 'admin';
+    const isExempt = isAdmin || !!user.is_test_teacher;
+
     const { isKillSwitchActive, systemCapReached } = await this.checkSystemStatus(dateVn);
-    if (isKillSwitchActive) {
+    if (!isAdmin && isKillSwitchActive) {
       return { allowed: false, reason: 'Hệ thống AI hiện đang tạm bảo trì theo chỉ định quản trị viên.', promptHash };
     }
-    if (systemCapReached) {
+    if (!isAdmin && systemCapReached) {
       return { allowed: false, reason: 'Hệ thống đã đạt trần phục vụ trong ngày. Vui lòng thử lại vào ngày mai!', promptHash };
     }
 
-    // 3. Check user quota (if not test teacher)
-    if (!user.is_test_teacher) {
+    // 3. Check user quota (if exempt, e.g. admin or test teacher, skip daily limit check)
+    if (!isExempt) {
       const baseLimit = await this.getEffectiveLimit(user.id);
       const extra = await this.getExtraGrants(user.id, dateVn);
       const totalLimit = baseLimit + extra;
@@ -240,7 +243,7 @@ export class QuotaService {
         };
       }
     } else {
-      // Test teacher still updates usage row for audit
+      // Admin and test teacher still update usage row for audit
       await query(
         `INSERT INTO daily_usage (user_id, date_vn, reserved_count, success_count, no_source_count, failed_count)
          VALUES ($1, $2, 1, 0, 0, 0)

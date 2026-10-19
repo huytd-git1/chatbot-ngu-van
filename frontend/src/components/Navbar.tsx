@@ -53,7 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {quota.isUnlimited ? (
                       <span className="flex items-center gap-1 text-emerald-800 font-semibold">
                         <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                        Lượt hỏi: Không giới hạn (Giáo viên Test)
+                        Lượt hỏi: Không giới hạn {user.role === 'admin' ? '(Quản trị viên)' : '(Giáo viên Test)'}
                       </span>
                     ) : (
                       <span className="flex items-center gap-1">
@@ -73,7 +73,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {quota.isUnlimited ? (
                       <span className="flex items-center gap-1 text-emerald-700">
                         <Sparkles className="w-3 h-3 text-emerald-600" />
-                        <span>Vô hạn</span>
+                        <span>Vô hạn {user.role === 'admin' ? '(Admin)' : ''}</span>
                       </span>
                     ) : (
                       <span className="flex items-center gap-1">
