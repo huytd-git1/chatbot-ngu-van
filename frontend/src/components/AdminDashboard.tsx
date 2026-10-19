@@ -4,10 +4,11 @@ import {
   CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, Cpu,
   Layers, RefreshCw, Zap, ShieldCheck,
   Trash2, Users, GraduationCap, Plus, BookOpen, Lock, Unlock, KeyRound, X, Award,
-  BarChart3, RotateCcw, Activity, TrendingUp, Coins, Clock, ShieldAlert, ArrowRight
+  BarChart3, RotateCcw, Activity, TrendingUp, Coins, Clock, ShieldAlert, ArrowRight,
+  Globe, ExternalLink, Network, Server
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
-import type { KeyPoolItem, TokenStatsSummary } from '../types.js';
+import type { KeyPoolItem, TokenStatsSummary, ThirdPartyPreset } from '../types.js';
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'teachers' | 'classes' | 'ai' | 'system' | 'logs'>('teachers');
@@ -38,6 +39,7 @@ export const AdminDashboard: React.FC = () => {
   const [isKillSwitchActive, setIsKillSwitchActive] = useState(false);
 
   // AI Configuration State
+  const [providerType, setProviderType] = useState<'google_official' | 'third_party'>('google_official');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [maskedApiKey, setMaskedApiKey] = useState('');
@@ -50,6 +52,18 @@ export const AdminDashboard: React.FC = () => {
   const [resettingStats, setResettingStats] = useState(false);
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const [supportedModels, setSupportedModels] = useState<any[]>([]);
+
+  // Third-Party Gateway settings (RouteAPI, OpenRouter, DeepSeek, etc.)
+  const [customBaseUrl, setCustomBaseUrl] = useState('https://api.routeapi.ai/v1');
+  const [customApiKeyInput, setCustomApiKeyInput] = useState('');
+  const [showCustomApiKey, setShowCustomApiKey] = useState(false);
+  const [customModelName, setCustomModelName] = useState('google/gemini-2.5-flash');
+  const [hasCustomApiKey, setHasCustomApiKey] = useState(false);
+  const [customKeyCount, setCustomKeyCount] = useState(0);
+  const [customKeyPool, setCustomKeyPool] = useState<KeyPoolItem[]>([]);
+  const [thirdPartyPresets, setThirdPartyPresets] = useState<ThirdPartyPreset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState('routeapi');
+
   const [isLiveAiConfigured, setIsLiveAiConfigured] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
   const [saveAiMsg, setSaveAiMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -129,6 +143,7 @@ export const AdminDashboard: React.FC = () => {
     try {
       const data = await apiRequest('/api/admin/ai-settings');
       setIsLiveAiConfigured(!!data.isLiveConfigured);
+      setProviderType(data.providerType || 'google_official');
       setMaskedApiKey(data.maskedApiKey || '');
       setHasSavedKey(!!data.hasApiKey);
       setKeyCount(data.keyCount || 0);
@@ -137,6 +152,14 @@ export const AdminDashboard: React.FC = () => {
       if (data.tokenStats) setTokenStats(data.tokenStats);
       if (data.activeModel) setSelectedModel(data.activeModel);
       if (data.supportedModels) setSupportedModels(data.supportedModels);
+
+      // Third-party Gateway settings
+      if (data.customBaseUrl) setCustomBaseUrl(data.customBaseUrl);
+      if (data.customModelName) setCustomModelName(data.customModelName);
+      setHasCustomApiKey(!!data.hasCustomApiKey);
+      setCustomKeyCount(data.customKeyCount || 0);
+      setCustomKeyPool(data.customKeyPool || []);
+      if (data.thirdPartyPresets) setThirdPartyPresets(data.thirdPartyPresets);
     } catch {}
   };
 
@@ -317,6 +340,14 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleSelectPreset = (preset: ThirdPartyPreset) => {
+    setSelectedPresetId(preset.id);
+    setCustomBaseUrl(preset.baseUrl);
+    if (preset.suggestedModels && preset.suggestedModels.length > 0) {
+      setCustomModelName(preset.suggestedModels[0].id);
+    }
+  };
+
   const handleSaveAiSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingAi(true);
@@ -325,12 +356,17 @@ export const AdminDashboard: React.FC = () => {
       const res = await apiRequest('/api/admin/ai-settings', {
         method: 'PUT',
         body: JSON.stringify({
+          providerType,
           apiKey: apiKeyInput.trim() || undefined,
           modelName: selectedModel,
+          customBaseUrl: customBaseUrl.trim() || undefined,
+          customApiKey: customApiKeyInput.trim() || undefined,
+          customModelName: customModelName.trim() || undefined,
         }),
       });
       setSaveAiMsg({ type: 'success', text: res.message || 'Đã lưu cấu hình AI thành công.' });
       setApiKeyInput('');
+      setCustomApiKeyInput('');
       loadAiSettings();
       loadSettings();
     } catch (err: any) {
@@ -346,8 +382,12 @@ export const AdminDashboard: React.FC = () => {
       const res = await apiRequest('/api/admin/ai-settings/test', {
         method: 'POST',
         body: JSON.stringify({
+          providerType,
           apiKey: apiKeyInput.trim() || undefined,
           modelName: selectedModel,
+          customBaseUrl: customBaseUrl.trim() || undefined,
+          customApiKey: customApiKeyInput.trim() || undefined,
+          customModelName: customModelName.trim() || undefined,
         }),
       });
       setTestResult({
@@ -363,15 +403,16 @@ export const AdminDashboard: React.FC = () => {
       setTestResult({
         loading: false,
         success: false,
-        message: err.message || 'Không thể kết nối tới Google Gemini API.',
+        message: err.message || 'Không thể kết nối tới nhà cung cấp AI.',
       });
     }
   };
 
-  const handleDeleteKey = async (index: number, maskedKey: string) => {
-    if (!confirm(`Bạn có chắc chắn muốn xóa API Key #${index} (${maskedKey}) khỏi hệ thống không?`)) return;
+  const handleDeleteKey = async (index: number, maskedKey: string, provider: 'google_official' | 'third_party' = providerType) => {
+    const label = provider === 'third_party' ? 'Token bên thứ 3' : 'API Key';
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${label} #${index} (${maskedKey}) khỏi hệ thống không?`)) return;
     try {
-      const res = await apiRequest(`/api/admin/ai-settings/keys/${index}`, { method: 'DELETE' });
+      const res = await apiRequest(`/api/admin/ai-settings/keys/${index}?provider=${provider}`, { method: 'DELETE' });
       alert(res.message);
       loadAiSettings();
       loadSettings();
@@ -380,10 +421,11 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleClearAllKeys = async () => {
-    if (!confirm('Bạn có chắc chắn muốn XÓA TOÀN BỘ Google Gemini API Keys không?\n\nHệ thống sẽ chuyển về chế độ Giả lập kiểm thử (Mock Mode) cho đến khi có Key mới.')) return;
+  const handleClearAllKeys = async (provider: 'google_official' | 'third_party' = providerType) => {
+    const label = provider === 'third_party' ? 'toàn bộ Token bên thứ 3' : 'toàn bộ Google Gemini API Keys';
+    if (!confirm(`Bạn có chắc chắn muốn XÓA ${label} không?\n\nHệ thống sẽ chuyển về chế độ Giả lập kiểm thử (Mock Mode) cho đến khi có cấu hình mới.`)) return;
     try {
-      const res = await apiRequest('/api/admin/ai-settings/keys', { method: 'DELETE' });
+      const res = await apiRequest(`/api/admin/ai-settings/keys?provider=${provider}`, { method: 'DELETE' });
       alert(res.message);
       loadAiSettings();
       loadSettings();
@@ -1066,312 +1108,640 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
+          {/* Provider Mode Selection Switcher */}
+          <div className="p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row gap-1.5">
+            <button
+              type="button"
+              onClick={() => setProviderType('google_official')}
+              className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                providerType === 'google_official'
+                  ? 'bg-white text-[#0f2942] shadow-xs border border-slate-200/80 ring-1 ring-amber-500/20'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>1. Google Gemini Chính Thống (AI Studio)</span>
+              {providerType === 'google_official' && (
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setProviderType('third_party')}
+              className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                providerType === 'third_party'
+                  ? 'bg-white text-indigo-950 shadow-xs border border-indigo-200 ring-1 ring-indigo-500/30'
+                  : 'text-slate-600 hover:text-indigo-900 hover:bg-white/50'
+              }`}
+            >
+              <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>2. Cổng API Bên Thứ 3 (RouteAPI / OpenRouter)</span>
+              {providerType === 'third_party' && (
+                <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+              )}
+            </button>
+          </div>
+
           <form onSubmit={handleSaveAiSettings} className="space-y-5">
-            {/* Prominent Active Saved Key Pool Card */}
-            {hasSavedKey && (
-              <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl space-y-3 shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
-                      <CheckCircle2 className="w-5 h-5" />
+            {/* BRANCH A: THIRD-PARTY GATEWAY PROVIDER (RouteAPI, OpenRouter, DeepSeek, etc.) */}
+            {providerType === 'third_party' ? (
+              <div className="space-y-5">
+                {/* Third-Party Gateway Info Banner with RouteAPI link */}
+                <div className="p-4 bg-indigo-50/80 border border-indigo-200/90 rounded-2xl flex items-start gap-3 shadow-2xs">
+                  <Globe className="w-5 h-5 text-indigo-700 shrink-0 mt-0.5" />
+                  <div className="text-xs text-indigo-950 space-y-1.5 leading-relaxed">
+                    <div className="font-bold flex items-center gap-1.5 text-indigo-900">
+                      <span>Tích hợp Cổng API Bên Thứ Ba (RouteAPI / OpenRouter / DeepSeek):</span>
                     </div>
-                    <div>
-                      <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
-                        Nhóm Gemini API Key đang hoạt động ({keyCount} Keys)
-                      </div>
-                      <div className="text-[11px] text-emerald-700 mt-0.5">
-                        {activeKeyCount}/{keyCount} key đang sẵn sàng phân bổ tải & dự phòng tự động
-                      </div>
+                    <p className="text-[11px] text-indigo-900/90">
+                      Hỗ trợ chuẩn <strong>OpenAI-compatible (/chat/completions)</strong>. Quý thầy cô có thể sử dụng các nhà cung cấp như{' '}
+                      <a
+                        href="https://www.routeapi.ai/docs/en/api-reference/overview/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-bold underline text-indigo-800 hover:text-indigo-950 inline-flex items-center gap-0.5"
+                      >
+                        RouteAPI.ai <ExternalLink className="w-3 h-3" />
+                      </a>
+                      , OpenRouter, DeepSeek hoặc proxy trung gian (OneAPI, NewAPI) để tận dụng hạ tầng ổn định, không lo giới hạn hạn ngạch Free Tier cá nhân.
+                    </p>
+                    <div className="text-[10px] text-indigo-700 font-medium flex flex-wrap items-center gap-2 pt-1 border-t border-indigo-200/60">
+                      <span className="bg-white/80 px-2 py-0.5 rounded-md border border-indigo-200">✅ Chuẩn OpenAI Chat Completions</span>
+                      <span className="bg-white/80 px-2 py-0.5 rounded-md border border-indigo-200">✅ Bảo lưu 100% Kiểm chứng Trích dẫn RAG</span>
+                      <span className="bg-white/80 px-2 py-0.5 rounded-md border border-indigo-200">✅ Hỗ trợ nhiều Bearer Token (Key Pool)</span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleClearAllKeys}
-                      className="px-2.5 py-1 text-[10px] font-bold text-red-700 bg-red-100/80 hover:bg-red-200 rounded-lg transition-colors flex items-center gap-1 border border-red-200 shadow-2xs cursor-pointer"
-                      title="Xóa toàn bộ các API Key trong pool"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Xóa tất cả</span>
-                    </button>
-                    <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-full text-[10px] font-bold tracking-wide uppercase flex items-center gap-1 shadow-2xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                      Pool Active
-                    </span>
                   </div>
                 </div>
 
-                {/* Key Pool List with Per-Key Token Consumption */}
-                {keyPool.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-emerald-200/60">
-                    {keyPool.map((k) => (
-                      <div
-                        key={k.index}
-                        className="p-3.5 rounded-2xl bg-white/95 border border-emerald-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-emerald-300 hover:shadow-xs"
-                      >
-                        {/* Header: Index, Masked Key, Status, Delete */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="w-5 h-5 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-bold flex items-center justify-center shrink-0">
-                              #{k.index}
-                            </span>
-                            <span className="font-mono text-emerald-950 font-bold truncate text-[11px] bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/80">
-                              {k.maskedKey}
-                            </span>
+                {/* Quick Presets Selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Server className="w-4 h-4 text-slate-500" />
+                    Chọn nhanh Nhà cung cấp (Preset Cấu hình):
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {thirdPartyPresets.map((p) => {
+                      const isSelected = selectedPresetId === p.id || customBaseUrl === p.baseUrl;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => handleSelectPreset(p)}
+                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-indigo-50 border-indigo-500 text-indigo-950 font-bold ring-1 ring-indigo-500/30 shadow-2xs'
+                              : 'bg-white border-slate-200/80 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="text-xs font-bold flex items-center justify-between">
+                            <span>{p.name}</span>
+                            {isSelected && <span className="w-2 h-2 rounded-full bg-indigo-600" />}
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {k.isCooldown ? (
-                              <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shrink-0">
-                                <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Làm mát ({k.cooldownSecondsLeft}s)
-                              </span>
-                            ) : (
-                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold shrink-0">
-                                Sẵn sàng
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteKey(k.index, k.maskedKey)}
-                              title={`Xóa API Key #${k.index}`}
-                              className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5 font-mono">
+                            {p.baseUrl}
                           </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Saved Third-Party Key Pool Card */}
+                {hasCustomApiKey && (
+                  <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-3 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-700 shrink-0">
+                          <Network className="w-5 h-5" />
                         </div>
-
-                        {/* Token Consumption & Usage Stats for this Key */}
-                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[11px]">
-                          <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
-                            <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
-                              <Coins className="w-3 h-3 text-indigo-500" />
-                              Token Tiêu Thụ
-                            </div>
-                            <div className="font-mono font-bold text-slate-900 text-xs">
-                              {(k.totalTokens ?? 0).toLocaleString('vi-VN')}
-                            </div>
-                            <div className="text-[9px] text-slate-400 flex items-center gap-1">
-                              <span>In: {(k.promptTokens ?? 0).toLocaleString('vi-VN')}</span>
-                              <span>•</span>
-                              <span>Out: {(k.outputTokens ?? 0).toLocaleString('vi-VN')}</span>
-                            </div>
+                        <div>
+                          <div className="text-xs font-bold text-indigo-950 flex items-center gap-2">
+                            Nhóm Token Bên Thứ 3 đang hoạt động ({customKeyCount} Tokens)
                           </div>
-
-                          <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
-                            <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
-                              <Activity className="w-3 h-3 text-emerald-500" />
-                              Số Lượt Yêu Cầu
-                            </div>
-                            <div className="font-mono font-bold text-slate-900 text-xs">
-                              {k.requestCount ?? 0} <span className="text-[10px] font-normal text-slate-500">lượt</span>
-                            </div>
-                            <div className="text-[9px] text-slate-400 flex items-center gap-1">
-                              <span className="text-emerald-600 font-medium">{k.successCount ?? 0} ok</span>
-                              {k.errorCount ? <span className="text-red-500 font-medium">• {k.errorCount} lỗi</span> : null}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Load share percentage & Last used at */}
-                        <div className="space-y-1 pt-1">
-                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
-                            <span>Tỷ lệ tiêu thụ: <strong className="text-emerald-700">{k.percentShare ?? 0}%</strong></span>
-                            <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                              <Clock className="w-2.5 h-2.5" />
-                              {formatDateTime(k.lastUsedAt)}
-                            </span>
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className="bg-linear-to-r from-emerald-500 to-teal-600 h-1.5 rounded-full transition-all duration-500"
-                              style={{ width: `${Math.min(100, Math.max(0, k.percentShare ?? 0))}%` }}
-                            />
+                          <div className="text-[11px] text-indigo-700 mt-0.5">
+                            Đang kết nối: <code className="font-mono font-semibold">{customBaseUrl}</code>
                           </div>
                         </div>
                       </div>
-                    ))}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleClearAllKeys('third_party')}
+                          className="px-2.5 py-1 text-[10px] font-bold text-red-700 bg-red-100/80 hover:bg-red-200 rounded-lg transition-colors flex items-center gap-1 border border-red-200 shadow-2xs cursor-pointer"
+                          title="Xóa toàn bộ các Token bên thứ 3 trong pool"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Xóa tất cả</span>
+                        </button>
+                        <span className="px-2.5 py-1 bg-indigo-600 text-white rounded-full text-[10px] font-bold tracking-wide uppercase flex items-center gap-1 shadow-2xs">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                          Gateway Active
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Custom Key Pool List */}
+                    {customKeyPool.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-indigo-200/60">
+                        {customKeyPool.map((k) => (
+                          <div
+                            key={k.index}
+                            className="p-3.5 rounded-2xl bg-white/95 border border-indigo-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-indigo-300 hover:shadow-xs"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-5 h-5 rounded-lg bg-indigo-100 text-indigo-800 text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  #{k.index}
+                                </span>
+                                <span className="font-mono text-indigo-950 font-bold truncate text-[11px] bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/80">
+                                  {k.maskedKey}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {k.isCooldown ? (
+                                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shrink-0">
+                                    <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Làm mát ({k.cooldownSecondsLeft}s)
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-bold shrink-0">
+                                    Sẵn sàng
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteKey(k.index, k.maskedKey, 'third_party')}
+                                  title={`Xóa Token #${k.index}`}
+                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Token Consumption */}
+                            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[11px]">
+                              <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
+                                <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                                  <Coins className="w-3 h-3 text-indigo-500" />
+                                  Token Tiêu Thụ
+                                </div>
+                                <div className="font-mono font-bold text-slate-900 text-xs">
+                                  {(k.totalTokens ?? 0).toLocaleString('vi-VN')}
+                                </div>
+                                <div className="text-[9px] text-slate-400 flex items-center gap-1">
+                                  <span>In: {(k.promptTokens ?? 0).toLocaleString('vi-VN')}</span>
+                                  <span>•</span>
+                                  <span>Out: {(k.outputTokens ?? 0).toLocaleString('vi-VN')}</span>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
+                                <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                                  <Activity className="w-3 h-3 text-emerald-500" />
+                                  Số Lượt Yêu Cầu
+                                </div>
+                                <div className="font-mono font-bold text-slate-900 text-xs">
+                                  {k.requestCount ?? 0} <span className="text-[10px] font-normal text-slate-500">lượt</span>
+                                </div>
+                                <div className="text-[9px] text-slate-400 flex items-center gap-1">
+                                  <span className="text-emerald-600 font-medium">{k.successCount ?? 0} ok</span>
+                                  {k.errorCount ? <span className="text-red-500 font-medium">• {k.errorCount} lỗi</span> : null}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1 pt-1">
+                              <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                                <span>Tỷ lệ tiêu thụ: <strong className="text-indigo-700">{k.percentShare ?? 0}%</strong></span>
+                                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {formatDateTime(k.lastUsedAt)}
+                                </span>
+                              </div>
+                              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-linear-to-r from-indigo-500 to-purple-600 h-1.5 rounded-full transition-all duration-500"
+                                  style={{ width: `${Math.min(100, Math.max(0, k.percentShare ?? 0))}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Google ToS & Architecture Best Practices Section */}
-            <div className="space-y-3">
-              {/* Policy Warning & Best Practice Recommendation */}
-              <div className="p-4 bg-amber-50/90 border border-amber-200/90 rounded-2xl flex items-start gap-3 shadow-2xs">
-                <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
-                <div className="text-xs text-amber-950 space-y-1 leading-relaxed">
-                  <div className="font-bold flex items-center gap-1.5 text-amber-900">
-                    Lưu ý về Chính sách Google (ToS Compliance) & Khuyến nghị vận hành chuẩn:
-                  </div>
-                  <p className="text-[11px] text-amber-900/90">
-                    Việc tạo nhiều tài khoản Google khác nhau để thu thập API Key miễn phí (Free Tier) vi phạm điều khoản dịch vụ của Google về hành vi lách hạn ngạch (<em>circumvent usage limits</em>). Hệ thống bảo vệ của Google có thể giám sát dải IP, thiết bị và lưu lượng truy cập để khóa đồng loạt quyền truy cập API (lỗi 403 ToS disabled).
-                  </p>
-                  <p className="text-[11px] text-amber-900 font-semibold pt-1">
-                    👉 <strong>Giải pháp chuẩn (Best Practice):</strong> Sử dụng 1 tài khoản Google chính thống kích hoạt thanh toán Pay-as-you-go (chi phí các dòng Gemini Flash cực kỳ tiết kiệm, chỉ khoảng ~0.10$/1M token) HOẶC sử dụng bộ đôi cơ chế <strong>Luân phiên Cấp độ Mô hình (Model Fallback)</strong> và <strong>Hàng đợi Thử lại Thích ứng (Adaptive Queue Backoff)</strong> đã được cấu hình tự động dưới đây.
+                {/* Custom Base URL Field */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-slate-500" />
+                    Base URL của Cổng API (OpenAI Compatible Endpoint):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://api.routeapi.ai/v1 hoặc https://openrouter.ai/api/v1"
+                    value={customBaseUrl}
+                    onChange={(e) => setCustomBaseUrl(e.target.value.trim())}
+                    className="w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Hệ thống sẽ tự động gọi tới <code className="font-mono font-semibold text-slate-700">{customBaseUrl.replace(/\/+$/, '')}/chat/completions</code>.
                   </p>
                 </div>
-              </div>
 
-              {/* Architecture 2-Pillars Cards: Model Fallback + Backoff Queue */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* Pillar 1: Model Fallback Cascade */}
-                <div className="p-3.5 bg-sky-50/80 border border-sky-200/80 rounded-2xl text-xs space-y-2 shadow-2xs">
-                  <div className="flex items-center gap-2 text-sky-950 font-bold">
-                    <Zap className="w-4 h-4 text-sky-600" />
-                    <span>A. Luân chuyển Cấp độ Mô hình (Model Fallback)</span>
+                {/* Custom API Key / Token input area */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-slate-500" />
+                      {hasCustomApiKey
+                        ? 'Thêm / Thay thế danh sách Token Bên Thứ Ba:'
+                        : 'Nhập danh sách Token Bên Thứ Ba:'}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {customApiKeyInput.trim() && (
+                        <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                          Nhận diện: {customApiKeyInput.split(/[\n,;\r]+/).filter((k) => k.trim().length > 0).length} tokens
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomApiKey(!showCustomApiKey)}
+                        className="text-[11px] text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        {showCustomApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        {showCustomApiKey ? 'Ẩn ký tự' : 'Hiện ký tự'}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-sky-900/85 leading-relaxed">
-                    Mỗi mô hình trên Google AI Studio có hạn mức RPM/TPM độc lập. Khi mô hình phân tích chuyên sâu gặp lỗi quá tải (429/503), hệ thống tự động hạ cấp tầng mô hình nhẹ hơn trên cùng API Key:
-                  </p>
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono font-bold text-sky-950">
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-3.8-flash</span>
-                    <ArrowRight className="w-3 h-3 text-sky-400" />
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-3.6-flash</span>
-                    <ArrowRight className="w-3 h-3 text-sky-400" />
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-2.5-flash</span>
-                    <ArrowRight className="w-3 h-3 text-sky-400" />
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs text-emerald-800">2.5-flash-lite</span>
-                  </div>
-                </div>
 
-                {/* Pillar 2: Adaptive Backoff & Queue Throttling */}
-                <div className="p-3.5 bg-teal-50/80 border border-teal-200/80 rounded-2xl text-xs space-y-2 shadow-2xs">
-                  <div className="flex items-center gap-2 text-teal-950 font-bold">
-                    <Clock className="w-4 h-4 text-teal-600" />
-                    <span>B. Hàng đợi Điều tiết & Thử lại (Backoff & Queue)</span>
-                  </div>
-                  <p className="text-[11px] text-teal-900/85 leading-relaxed">
-                    Hạn mức Free Tier của Google phục hồi liên tục theo từng phút (15 RPM). Hệ thống tích hợp hàng đợi giãn cách tối thiểu 350ms và tự động thử lại sau 2–2.8 giây (kèm Jitter ngẫu nhiên) khi chạm ngưỡng phút, giúp học sinh không bao giờ bị đứt gãy câu hỏi.
-                  </p>
-                  <div className="flex items-center gap-2 pt-1 text-[10px] text-teal-800 font-medium">
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Giãn cách: 350ms</span>
-                    <span>•</span>
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Thử lại: 2.0s - 2.8s Backoff</span>
-                    <span>•</span>
-                    <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Chuyển Key: 60s làm mát</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* API Key input area */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-slate-500" />
-                  {hasSavedKey
-                    ? 'Thêm / Thay thế danh sách Google Gemini API Keys:'
-                    : 'Nhập danh sách Google Gemini API Keys:'}
-                </label>
-                <div className="flex items-center gap-2">
-                  {apiKeyInput.trim() && (
-                    <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                      Nhận diện: {apiKeyInput.split(/[\n,;\r]+/).filter((k) => k.trim().length > 0).length} keys
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="text-[11px] text-slate-500 hover:text-slate-700 flex items-center gap-1"
-                  >
-                    {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    {showApiKey ? 'Ẩn ký tự' : 'Hiện ký tự'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="relative">
-                <textarea
-                  rows={3}
-                  placeholder={`Dán một hoặc nhiều API Key tại đây (Mỗi key một dòng hoặc cách nhau bởi dấu phẩy):\nAIzaSyA...\nAIzaSyB...\nAIzaSyC...`}
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  className={`w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none resize-y ${
-                    !showApiKey && apiKeyInput ? 'filter blur-[1.5px] hover:blur-none transition-all' : ''
-                  }`}
-                />
-              </div>
-
-              <p className="text-[11px] text-slate-500">
-                Gợi ý: Quý thầy cô có thể tạo nhiều API Key miễn phí từ các tài khoản Google khác nhau tại{' '}
-                <a
-                  href="https://aistudio.google.com/app/apikey"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-amber-700 underline font-semibold"
-                >
-                  Google AI Studio
-                </a>{' '}
-                và dán tất cả vào đây để tăng hạn mức hỏi đáp lên gấp nhiều lần.
-              </p>
-            </div>
-
-            {/* Model Selection */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 block">
-                Lựa chọn Mô hình AI (Model Selection):
-              </label>
-
-              <div className="grid grid-cols-1 gap-2.5">
-                {supportedModels.map((m) => {
-                  const isSelected = selectedModel === m.id;
-                  return (
-                    <label
-                      key={m.id}
-                      onClick={() => setSelectedModel(m.id)}
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between ${
-                        isSelected
-                          ? 'border-[#0f2942] bg-[#0f2942]/5 ring-1 ring-[#0f2942]'
-                          : 'border-[#e8e2d5] bg-white hover:bg-[#fbf9f4]'
+                  <div className="relative">
+                    <textarea
+                      rows={3}
+                      placeholder={`Dán một hoặc nhiều API Key / Bearer Token tại đây (Mỗi token một dòng):\nsk-route-xxxx...\nsk-route-yyyy...\nsk-or-v1-zzzz...`}
+                      value={customApiKeyInput}
+                      onChange={(e) => setCustomApiKeyInput(e.target.value)}
+                      className={`w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none resize-y ${
+                        !showCustomApiKey && customApiKeyInput ? 'filter blur-[1.5px] hover:blur-none transition-all' : ''
                       }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <input
-                          type="radio"
-                          name="geminiModel"
-                          value={m.id}
-                          checked={isSelected}
-                          onChange={() => setSelectedModel(m.id)}
-                          className="mt-1 text-[#0f2942]"
-                        />
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    Token được bảo vệ an toàn trên hệ thống và tự động phân bổ tải xoay vòng nếu bạn nhập nhiều token.
+                  </p>
+                </div>
+
+                {/* Custom Model Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    Tên Mô hình Mục tiêu (Target Model ID):
+                  </label>
+
+                  {/* Suggested Models Pills for Current Preset */}
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+                      { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+                      { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+                      { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
+                      { id: 'anthropic/claude-3-5-haiku', label: 'Claude 3.5 Haiku' },
+                    ].map((sm) => (
+                      <button
+                        key={sm.id}
+                        type="button"
+                        onClick={() => setCustomModelName(sm.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-mono transition-all cursor-pointer border ${
+                          customModelName === sm.id
+                            ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
+                        }`}
+                      >
+                        {sm.label} <span className="opacity-70 text-[10px]">({sm.id})</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="pt-1">
+                    <input
+                      type="text"
+                      placeholder="Hoặc nhập định danh mô hình tùy ý (vd: google/gemini-2.5-flash, deepseek/deepseek-chat...)"
+                      value={customModelName}
+                      onChange={(e) => setCustomModelName(e.target.value.trim())}
+                      className="w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* BRANCH B: GOOGLE OFFICIAL AI STUDIO (Original) */
+              <div className="space-y-5">
+                {/* Prominent Active Saved Key Pool Card */}
+                {hasSavedKey && (
+                  <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl space-y-3 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                          <CheckCircle2 className="w-5 h-5" />
+                        </div>
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-[#0f2942]">{m.name}</span>
-                            {m.badge && (
-                              <span
-                                className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
-                                  m.badge === 'Khuyên dùng'
-                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                    : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                }`}
-                              >
-                                {m.badge}
-                              </span>
-                            )}
+                          <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
+                            Nhóm Gemini API Key đang hoạt động ({keyCount} Keys)
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5">{m.description}</p>
-                          <code className="text-[10px] font-mono text-slate-400 mt-1 block">ID: {m.id}</code>
+                          <div className="text-[11px] text-emerald-700 mt-0.5">
+                            {activeKeyCount}/{keyCount} key đang sẵn sàng phân bổ tải & dự phòng tự động
+                          </div>
                         </div>
                       </div>
-                      <Cpu className={`w-4 h-4 shrink-0 mt-1 ${isSelected ? 'text-[#0f2942]' : 'text-slate-300'}`} />
-                    </label>
-                  );
-                })}
-              </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleClearAllKeys('google_official')}
+                          className="px-2.5 py-1 text-[10px] font-bold text-red-700 bg-red-100/80 hover:bg-red-200 rounded-lg transition-colors flex items-center gap-1 border border-red-200 shadow-2xs cursor-pointer"
+                          title="Xóa toàn bộ các API Key trong pool"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Xóa tất cả</span>
+                        </button>
+                        <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-full text-[10px] font-bold tracking-wide uppercase flex items-center gap-1 shadow-2xs">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                          Pool Active
+                        </span>
+                      </div>
+                    </div>
 
-              {/* Custom Model input */}
-              <div className="pt-2">
-                <label className="text-[11px] text-slate-600 block mb-1">Hoặc nhập mã mô hình Gemini tùy chỉnh khác:</label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: gemini-1.5-flash, gemini-1.5-pro..."
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value.trim())}
-                  className="w-full text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono"
-                />
+                    {/* Key Pool List with Per-Key Token Consumption */}
+                    {keyPool.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-emerald-200/60">
+                        {keyPool.map((k) => (
+                          <div
+                            key={k.index}
+                            className="p-3.5 rounded-2xl bg-white/95 border border-emerald-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-emerald-300 hover:shadow-xs"
+                          >
+                            {/* Header: Index, Masked Key, Status, Delete */}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-5 h-5 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  #{k.index}
+                                </span>
+                                <span className="font-mono text-emerald-950 font-bold truncate text-[11px] bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/80">
+                                  {k.maskedKey}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {k.isCooldown ? (
+                                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shrink-0">
+                                    <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Làm mát ({k.cooldownSecondsLeft}s)
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold shrink-0">
+                                    Sẵn sàng
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteKey(k.index, k.maskedKey, 'google_official')}
+                                  title={`Xóa API Key #${k.index}`}
+                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Token Consumption & Usage Stats for this Key */}
+                            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[11px]">
+                              <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
+                                <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                                  <Coins className="w-3 h-3 text-indigo-500" />
+                                  Token Tiêu Thụ
+                                </div>
+                                <div className="font-mono font-bold text-slate-900 text-xs">
+                                  {(k.totalTokens ?? 0).toLocaleString('vi-VN')}
+                                </div>
+                                <div className="text-[9px] text-slate-400 flex items-center gap-1">
+                                  <span>In: {(k.promptTokens ?? 0).toLocaleString('vi-VN')}</span>
+                                  <span>•</span>
+                                  <span>Out: {(k.outputTokens ?? 0).toLocaleString('vi-VN')}</span>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
+                                <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                                  <Activity className="w-3 h-3 text-emerald-500" />
+                                  Số Lượt Yêu Cầu
+                                </div>
+                                <div className="font-mono font-bold text-slate-900 text-xs">
+                                  {k.requestCount ?? 0} <span className="text-[10px] font-normal text-slate-500">lượt</span>
+                                </div>
+                                <div className="text-[9px] text-slate-400 flex items-center gap-1">
+                                  <span className="text-emerald-600 font-medium">{k.successCount ?? 0} ok</span>
+                                  {k.errorCount ? <span className="text-red-500 font-medium">• {k.errorCount} lỗi</span> : null}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Load share percentage & Last used at */}
+                            <div className="space-y-1 pt-1">
+                              <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                                <span>Tỷ lệ tiêu thụ: <strong className="text-emerald-700">{k.percentShare ?? 0}%</strong></span>
+                                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {formatDateTime(k.lastUsedAt)}
+                                </span>
+                              </div>
+                              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-linear-to-r from-emerald-500 to-teal-600 h-1.5 rounded-full transition-all duration-500"
+                                  style={{ width: `${Math.min(100, Math.max(0, k.percentShare ?? 0))}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Google ToS & Architecture Best Practices Section */}
+                <div className="space-y-3">
+                  <div className="p-4 bg-amber-50/90 border border-amber-200/90 rounded-2xl flex items-start gap-3 shadow-2xs">
+                    <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-950 space-y-1 leading-relaxed">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                        Lưu ý về Chính sách Google (ToS Compliance) & Khuyến nghị vận hành chuẩn:
+                      </div>
+                      <p className="text-[11px] text-amber-900/90">
+                        Việc tạo nhiều tài khoản Google khác nhau để thu thập API Key miễn phí (Free Tier) vi phạm điều khoản dịch vụ của Google về hành vi lách hạn ngạch (<em>circumvent usage limits</em>). Hệ thống bảo vệ của Google có thể giám sát dải IP, thiết bị và lưu lượng truy cập để khóa đồng loạt quyền truy cập API (lỗi 403 ToS disabled).
+                      </p>
+                      <p className="text-[11px] text-amber-900 font-semibold pt-1">
+                        👉 <strong>Giải pháp chuẩn (Best Practice):</strong> Sử dụng 1 tài khoản Google chính thống kích hoạt thanh toán Pay-as-you-go HOẶC chuyển sang dùng Cổng API Bên Thứ 3 (RouteAPI / OpenRouter) ở tab bên cạnh để đảm bảo ổn định lâu dài.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Architecture 2-Pillars Cards: Model Fallback + Backoff Queue */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Pillar 1: Model Fallback Cascade */}
+                    <div className="p-3.5 bg-sky-50/80 border border-sky-200/80 rounded-2xl text-xs space-y-2 shadow-2xs">
+                      <div className="flex items-center gap-2 text-sky-950 font-bold">
+                        <Zap className="w-4 h-4 text-sky-600" />
+                        <span>A. Luân chuyển Cấp độ Mô hình (Model Fallback)</span>
+                      </div>
+                      <p className="text-[11px] text-sky-900/85 leading-relaxed">
+                        Mỗi mô hình trên Google AI Studio có hạn mức RPM/TPM độc lập. Khi mô hình phân tích chuyên sâu gặp lỗi quá tải (429/503), hệ thống tự động hạ cấp tầng mô hình nhẹ hơn trên cùng API Key:
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono font-bold text-sky-950">
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-3.8-flash</span>
+                        <ArrowRight className="w-3 h-3 text-sky-400" />
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-3.6-flash</span>
+                        <ArrowRight className="w-3 h-3 text-sky-400" />
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs">gemini-2.5-flash</span>
+                        <ArrowRight className="w-3 h-3 text-sky-400" />
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-sky-200 shadow-2xs text-emerald-800">2.5-flash-lite</span>
+                      </div>
+                    </div>
+
+                    {/* Pillar 2: Adaptive Backoff & Queue Throttling */}
+                    <div className="p-3.5 bg-teal-50/80 border border-teal-200/80 rounded-2xl text-xs space-y-2 shadow-2xs">
+                      <div className="flex items-center gap-2 text-teal-950 font-bold">
+                        <Clock className="w-4 h-4 text-teal-600" />
+                        <span>B. Hàng đợi Điều tiết & Thử lại (Backoff & Queue)</span>
+                      </div>
+                      <p className="text-[11px] text-teal-900/85 leading-relaxed">
+                        Hạn mức Free Tier của Google phục hồi liên tục theo từng phút (15 RPM). Hệ thống tích hợp hàng đợi giãn cách tối thiểu 350ms và tự động thử lại sau 2–2.8 giây (kèm Jitter ngẫu nhiên) khi chạm ngưỡng phút, giúp học sinh không bao giờ bị đứt gãy câu hỏi.
+                      </p>
+                      <div className="flex items-center gap-2 pt-1 text-[10px] text-teal-800 font-medium">
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Giãn cách: 350ms</span>
+                        <span>•</span>
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Thử lại: 2.0s - 2.8s Backoff</span>
+                        <span>•</span>
+                        <span className="bg-white px-2 py-0.5 rounded-md border border-teal-200 shadow-2xs">Chuyển Key: 60s làm mát</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* API Key input area */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-slate-500" />
+                      {hasSavedKey
+                        ? 'Thêm / Thay thế danh sách Google Gemini API Keys:'
+                        : 'Nhập danh sách Google Gemini API Keys:'}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {apiKeyInput.trim() && (
+                        <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                          Nhận diện: {apiKeyInput.split(/[\n,;\r]+/).filter((k) => k.trim().length > 0).length} keys
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="text-[11px] text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        {showApiKey ? 'Ẩn ký tự' : 'Hiện ký tự'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <textarea
+                      rows={3}
+                      placeholder={`Dán một hoặc nhiều API Key tại đây (Mỗi key một dòng hoặc cách nhau bởi dấu phẩy):\nAIzaSyA...\nAIzaSyB...\nAIzaSyC...`}
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      className={`w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none resize-y ${
+                        !showApiKey && apiKeyInput ? 'filter blur-[1.5px] hover:blur-none transition-all' : ''
+                      }`}
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    Gợi ý: Quý thầy cô có thể tạo API Key từ các tài khoản Google tại{' '}
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-amber-700 underline font-semibold"
+                    >
+                      Google AI Studio
+                    </a>.
+                  </p>
+                </div>
+
+                {/* Model Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    Lựa chọn Mô hình AI (Model Selection):
+                  </label>
+
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {supportedModels.map((m) => {
+                      const isSelected = selectedModel === m.id;
+                      return (
+                        <label
+                          key={m.id}
+                          onClick={() => setSelectedModel(m.id)}
+                          className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between ${
+                            isSelected
+                              ? 'border-[#0f2942] bg-[#0f2942]/5 ring-1 ring-[#0f2942]'
+                              : 'border-[#e8e2d5] bg-white hover:bg-[#fbf9f4]'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="radio"
+                              name="geminiModel"
+                              value={m.id}
+                              checked={isSelected}
+                              onChange={() => setSelectedModel(m.id)}
+                              className="mt-1 text-[#0f2942]"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-[#0f2942]">{m.name}</span>
+                                {m.badge && (
+                                  <span
+                                    className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
+                                      m.badge === 'Khuyên dùng'
+                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                        : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                    }`}
+                                  >
+                                    {m.badge}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5">{m.description}</p>
+                              <code className="text-[10px] font-mono text-slate-400 mt-1 block">ID: {m.id}</code>
+                            </div>
+                          </div>
+                          <Cpu className={`w-4 h-4 shrink-0 mt-1 ${isSelected ? 'text-[#0f2942]' : 'text-slate-300'}`} />
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Custom Model input */}
+                  <div className="pt-2">
+                    <label className="text-[11px] text-slate-600 block mb-1">Hoặc nhập mã mô hình Gemini tùy chỉnh khác:</label>
+                    <input
+                      type="text"
+                      placeholder="Ví dụ: gemini-1.5-flash, gemini-1.5-pro..."
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value.trim())}
+                      className="w-full text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Test Connection Results Card with Per-Key Diagnostics */}
             {testResult && (
@@ -1465,17 +1835,21 @@ export const AdminDashboard: React.FC = () => {
                 type="button"
                 onClick={handleTestAiConnection}
                 disabled={testResult?.loading}
-                className="px-4 py-2.5 rounded-xl border border-[#0f2942] text-[#0f2942] hover:bg-slate-50 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+                className="px-4 py-2.5 rounded-xl border border-[#0f2942] text-[#0f2942] hover:bg-slate-50 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
               >
                 {testResult?.loading ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Đang ping kiểm tra các API Key...
+                    {providerType === 'third_party' ? 'Đang ping RouteAPI / Cổng thứ 3...' : 'Đang ping kiểm tra các API Key...'}
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    Kiểm tra kết nối toàn bộ Keys
+                    {providerType === 'third_party' ? (
+                      <Globe className="w-3.5 h-3.5 text-indigo-600" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    )}
+                    {providerType === 'third_party' ? 'Kiểm tra kết nối Cổng Thứ 3' : 'Kiểm tra kết nối toàn bộ Keys'}
                   </>
                 )}
               </button>

@@ -404,13 +404,17 @@ export class AdminController {
   }
 
   /**
-   * Update Gemini AI Configuration (API Key & Model)
+   * Update Gemini AI Configuration (API Key & Model, or Third-Party Gateway)
    */
   static async updateAiSettings(req: Request, res: Response): Promise<void> {
     const schema = z.object({
       apiKey: z.string().optional(),
       modelName: z.string().optional(),
       embeddingModel: z.string().optional(),
+      providerType: z.enum(['google_official', 'third_party']).optional(),
+      customBaseUrl: z.string().optional(),
+      customApiKey: z.string().optional(),
+      customModelName: z.string().optional(),
     });
 
     const parsed = schema.safeParse(req.body);
@@ -419,10 +423,28 @@ export class AdminController {
       return;
     }
 
-    const { apiKey, modelName, embeddingModel } = parsed.data;
-    await GeminiService.updateAiConfig({ apiKey, modelName, embeddingModel });
+    const {
+      apiKey,
+      modelName,
+      embeddingModel,
+      providerType,
+      customBaseUrl,
+      customApiKey,
+      customModelName,
+    } = parsed.data;
+
+    await GeminiService.updateAiConfig({
+      apiKey,
+      modelName,
+      embeddingModel,
+      providerType,
+      customBaseUrl,
+      customApiKey,
+      customModelName,
+    });
 
     const keyCount = apiKey ? GeminiService.parseKeys(apiKey).length : undefined;
+    const customKeyCount = customApiKey ? GeminiService.parseKeys(customApiKey).length : undefined;
 
     // Log admin action
     await query(
@@ -431,9 +453,13 @@ export class AdminController {
       [
         req.user?.id || null,
         JSON.stringify({
+          providerType,
           modelName,
+          customModelName,
           hasNewApiKey: !!(apiKey && apiKey.trim() !== ''),
+          hasNewCustomApiKey: !!(customApiKey && customApiKey.trim() !== ''),
           keyCount,
+          customKeyCount,
         }),
         req.ip,
       ]
@@ -441,17 +467,22 @@ export class AdminController {
 
     const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
     res.status(200).json({
-      message: 'Đã cập nhật cấu hình Google Gemini AI thành công.',
+      message: 'Đã cập nhật cấu hình AI thành công.',
       config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
     });
   }
 
   /**
-   * Test connection to Gemini API with selected model
+   * Test connection to Gemini API or Third-Party Gateway
    */
   static async testAiConnection(req: Request, res: Response): Promise<void> {
-    const { apiKey, modelName } = req.body;
-    const result = await GeminiService.testConnection(apiKey, modelName);
+    const { apiKey, modelName, providerType, customBaseUrl, customApiKey, customModelName } = req.body;
+    const result = await GeminiService.testConnection(apiKey, modelName, {
+      providerType,
+      customBaseUrl,
+      customApiKey,
+      customModelName,
+    });
     res.status(result.success ? 200 : 400).json(result);
   }
 
@@ -460,24 +491,25 @@ export class AdminController {
    */
   static async deleteAiKey(req: Request, res: Response): Promise<void> {
     const index = parseInt(req.params.index, 10);
+    const provider = (req.query.provider as 'google_official' | 'third_party') || 'google_official';
     if (isNaN(index)) {
       res.status(400).json({ error: 'Chỉ số API Key không hợp lệ.' });
       return;
     }
 
     try {
-      await GeminiService.removeKeyByIndex(index);
+      await GeminiService.removeKeyByIndex(index, provider);
 
       // Log admin action
       await query(
         `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
          VALUES ($1, 'DELETE_AI_KEY', 'system', 'gemini_ai', $2, $3)`,
-        [req.user?.id || null, JSON.stringify({ deletedKeyIndex: index }), req.ip]
+        [req.user?.id || null, JSON.stringify({ deletedKeyIndex: index, provider }), req.ip]
       );
 
       const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
       res.status(200).json({
-        message: `Đã xóa API Key #${index} thành công.`,
+        message: `Đã xóa ${provider === 'third_party' ? 'Token bên thứ 3' : 'API Key'} #${index} thành công.`,
         config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
       });
     } catch (err: any) {
@@ -489,19 +521,20 @@ export class AdminController {
    * Clear all API keys from the pool (reset to Mock mode)
    */
   static async clearAllAiKeys(req: Request, res: Response): Promise<void> {
+    const provider = (req.query.provider as 'google_official' | 'third_party') || 'google_official';
     try {
-      await GeminiService.clearAllKeys();
+      await GeminiService.clearAllKeys(provider);
 
       // Log admin action
       await query(
         `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
-         VALUES ($1, 'CLEAR_ALL_AI_KEYS', 'system', 'gemini_ai', '{}', $2)`,
-        [req.user?.id || null, req.ip]
+         VALUES ($1, 'CLEAR_ALL_AI_KEYS', 'system', 'gemini_ai', $2, $3)`,
+        [req.user?.id || null, JSON.stringify({ provider }), req.ip]
       );
 
       const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
       res.status(200).json({
-        message: 'Đã xóa toàn bộ Gemini API Keys. Hệ thống đã chuyển về chế độ Giả lập kiểm thử (Mock Mode).',
+        message: `Đã xóa toàn bộ ${provider === 'third_party' ? 'Token bên thứ 3' : 'Gemini API Keys'}.`,
         config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
       });
     } catch (err: any) {

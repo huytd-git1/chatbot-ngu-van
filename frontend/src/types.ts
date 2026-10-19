@@ -176,3 +176,12 @@ export interface KeyPoolItem {
   percentShare: number;
 }
 
+export interface ThirdPartyPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  suggestedModels: Array<{ id: string; name: string }>;
+  description: string;
+}
+
+

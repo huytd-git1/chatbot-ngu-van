@@ -290,6 +290,12 @@ export async function runMigrations() {
     );
     CREATE INDEX IF NOT EXISTS idx_api_key_usage_hash ON api_key_usage(key_hash);
     ALTER TABLE chat_requests ADD COLUMN IF NOT EXISTS api_key_masked VARCHAR(60);
+    `,
+    `
+    ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS provider_type VARCHAR(50) DEFAULT 'google_official';
+    ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_base_url VARCHAR(255) DEFAULT 'https://api.routeapi.ai/v1';
+    ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_api_key TEXT;
+    ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_model_name VARCHAR(100) DEFAULT 'google/gemini-2.5-flash';
     `
   ];
 

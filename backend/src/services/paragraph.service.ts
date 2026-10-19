@@ -176,8 +176,9 @@ export class ParagraphService {
       : [normalizedQuote];
 
     for (const p of primaryParagraphs) {
+      const pNorm = p.normalized_content || DocumentService.normalizeText(p.content || '');
       if (!hasEllipsis) {
-        if (p.normalized_content.includes(normalizedQuote)) {
+        if (pNorm.includes(normalizedQuote)) {
           return {
             verified: true,
             matchedParagraph: p,
@@ -189,7 +190,7 @@ export class ParagraphService {
         let lastIdx = 0;
         let matched = true;
         for (const part of quoteParts) {
-          const idx = p.normalized_content.indexOf(part, lastIdx);
+          const idx = pNorm.indexOf(part, lastIdx);
           if (idx === -1) {
             matched = false;
             break;

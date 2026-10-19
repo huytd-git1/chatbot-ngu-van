@@ -98,6 +98,14 @@ export interface MultiKeyTestResponse {
   results: KeyTestResult[];
 }
 
+export interface ThirdPartyPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  suggestedModels: Array<{ id: string; name: string }>;
+  description: string;
+}
+
 export class GeminiService {
   private static activeApiKeys: string[] = [];
   private static roundRobinIndex: number = 0;
@@ -105,6 +113,66 @@ export class GeminiService {
   private static clientsCache: Map<string, GoogleGenAI> = new Map();
   private static activeModel: string = env.GEMINI_MODEL || 'gemini-3.8-flash';
   private static activeEmbeddingModel: string = env.GEMINI_EMBEDDING_MODEL || 'models/gemini-embedding-2';
+
+  // Third-Party / OpenAI-Compatible Gateway properties
+  private static providerType: 'google_official' | 'third_party' = 'google_official';
+  private static customBaseUrl: string = 'https://api.routeapi.ai/v1';
+  private static customApiKeys: string[] = [];
+  private static customModelName: string = 'google/gemini-2.5-flash';
+  private static customRoundRobinIndex: number = 0;
+  private static customKeyCooldowns: Map<string, number> = new Map();
+
+  public static readonly THIRD_PARTY_PRESETS: ThirdPartyPreset[] = [
+    {
+      id: 'routeapi',
+      name: 'RouteAPI (Hợp nhất AI Gateway - Khuyên dùng)',
+      baseUrl: 'https://api.routeapi.ai/v1',
+      suggestedModels: [
+        { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'google/gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
+        { id: 'anthropic/claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' },
+        { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
+        { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
+      ],
+      description: 'Cổng đa nhà cung cấp với một API Token duy nhất (hỗ trợ RouteAPI.ai chuẩn OpenAI)',
+    },
+    {
+      id: 'openrouter',
+      name: 'OpenRouter (Mạng lưới AI Quốc Tế)',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      suggestedModels: [
+        { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
+        { id: 'anthropic/claude-3-5-haiku', name: 'Claude 3.5 Haiku' },
+        { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3' },
+      ],
+      description: 'Mạng lưới gateway định tuyến toàn cầu với hàng trăm mô hình AI',
+    },
+    {
+      id: 'deepseek',
+      name: 'DeepSeek Official API',
+      baseUrl: 'https://api.deepseek.com/v1',
+      suggestedModels: [
+        { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)' },
+        { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)' },
+      ],
+      description: 'Mô hình tư duy và ngôn ngữ tự nhiên tối ưu chi phí từ DeepSeek',
+    },
+    {
+      id: 'custom',
+      name: 'Tùy chỉnh (OneAPI / NewAPI / Local Proxy)',
+      baseUrl: 'http://localhost:3000/v1',
+      suggestedModels: [
+        { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+      ],
+      description: 'Tương thích mọi server proxy chuẩn OpenAI (/v1/chat/completions)',
+    },
+  ];
+
+  public static getThirdPartyPresets(): ThirdPartyPreset[] {
+    return this.THIRD_PARTY_PRESETS;
+  }
 
   private static keyUsageMemoryMap: Map<string, {
     totalTokens: number;
@@ -182,7 +250,11 @@ export class GeminiService {
         api_key: string | null;
         model_name: string | null;
         embedding_model: string | null;
-      }>(`SELECT api_key, model_name, embedding_model FROM ai_settings WHERE id = 'default'`);
+        provider_type?: string | null;
+        custom_base_url?: string | null;
+        custom_api_key?: string | null;
+        custom_model_name?: string | null;
+      }>(`SELECT api_key, model_name, embedding_model, provider_type, custom_base_url, custom_api_key, custom_model_name FROM ai_settings WHERE id = 'default'`);
 
       if (rows.length > 0) {
         if (rows[0].api_key && rows[0].api_key.trim() !== '') {
@@ -197,14 +269,63 @@ export class GeminiService {
         if (rows[0].embedding_model && rows[0].embedding_model.trim() !== '') {
           this.activeEmbeddingModel = rows[0].embedding_model.trim();
         }
+        if (rows[0].provider_type === 'third_party' || rows[0].provider_type === 'google_official') {
+          this.providerType = rows[0].provider_type;
+        }
+        if (rows[0].custom_base_url && rows[0].custom_base_url.trim() !== '') {
+          this.customBaseUrl = rows[0].custom_base_url.trim();
+        }
+        if (rows[0].custom_api_key && rows[0].custom_api_key.trim() !== '') {
+          const parsedCustom = this.parseKeys(rows[0].custom_api_key);
+          if (parsedCustom.length > 0) {
+            this.customApiKeys = parsedCustom;
+          }
+        }
+        if (rows[0].custom_model_name && rows[0].custom_model_name.trim() !== '') {
+          this.customModelName = rows[0].custom_model_name.trim();
+        }
       }
       this.clientsCache.clear();
       console.log(
-        `[GeminiService] AI Config loaded: Model=${this.activeModel}, KeysPoolSize=${this.activeApiKeys.length}, LiveAPI=${this.isLiveApiConfigured()}`
+        `[GeminiService] AI Config loaded: Provider=${this.providerType}, Model=${this.providerType === 'third_party' ? this.customModelName : this.activeModel}, GoogleKeys=${this.activeApiKeys.length}, ThirdPartyKeys=${this.customApiKeys.length}, LiveAPI=${this.isLiveApiConfigured()}`
       );
     } catch (err) {
       console.warn('[GeminiService] Could not load ai_settings from DB, using env fallback:', err);
     }
+  }
+
+  /**
+   * Gets ordered candidate Third-Party API tokens with round-robin rotation, prioritizing non-cooling tokens
+   */
+  public static getThirdPartyCandidateKeys(): string[] {
+    const total = this.customApiKeys.length;
+    if (total === 0) return [];
+
+    const now = Date.now();
+    for (const [k, exp] of this.customKeyCooldowns.entries()) {
+      if (now >= exp) {
+        this.customKeyCooldowns.delete(k);
+      }
+    }
+
+    const ordered: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const idx = (this.customRoundRobinIndex + i) % total;
+      ordered.push(this.customApiKeys[idx]);
+    }
+    this.customRoundRobinIndex = (this.customRoundRobinIndex + 1) % total;
+
+    const readyKeys = ordered.filter((k) => !this.customKeyCooldowns.has(k));
+    const coolingKeys = ordered.filter((k) => this.customKeyCooldowns.has(k));
+    return [...readyKeys, ...coolingKeys];
+  }
+
+  /**
+   * Mark a Third-Party key as cooling down for a given duration (default: 60s)
+   */
+  public static markThirdPartyKeyCooldown(key: string, durationMs: number = 60000): void {
+    this.customKeyCooldowns.set(key, Date.now() + durationMs);
+    console.warn(`[GeminiService] Third-Party Token (${this.maskKey(key)}) put into cooldown for ${Math.round(durationMs / 1000)}s.`);
   }
 
   /**
@@ -488,6 +609,44 @@ export class GeminiService {
       maskedKeySummary = `${this.maskKey(this.activeApiKeys[0])} (+${this.activeApiKeys.length - 1} keys dự phòng)`;
     }
 
+    const customMaskedKeys: KeyHealthStatus[] = this.customApiKeys.map((key, idx) => {
+      const cooldownExp = this.customKeyCooldowns.get(key) || 0;
+      const isCooldown = cooldownExp > now;
+      const cooldownSecondsLeft = isCooldown ? Math.ceil((cooldownExp - now) / 1000) : 0;
+      const u = usageMap.get(this.hashKey(key));
+
+      const totalTokens = u?.totalTokens ?? 0;
+      const promptTokens = u?.promptTokens ?? 0;
+      const outputTokens = u?.outputTokens ?? 0;
+      const requestCount = u?.requestCount ?? 0;
+      const successCount = u?.successCount ?? 0;
+      const errorCount = u?.errorCount ?? 0;
+      const lastUsedAt = u?.lastUsedAt ?? null;
+      const percentShare = overallTokens > 0 ? Math.round((totalTokens / overallTokens) * 1000) / 10 : 0;
+
+      return {
+        index: idx + 1,
+        maskedKey: this.maskKey(key),
+        isCooldown,
+        cooldownSecondsLeft,
+        totalTokens,
+        promptTokens,
+        outputTokens,
+        requestCount,
+        successCount,
+        errorCount,
+        lastUsedAt,
+        percentShare,
+      };
+    });
+
+    let maskedCustomKeySummary = '';
+    if (this.customApiKeys.length === 1) {
+      maskedCustomKeySummary = this.maskKey(this.customApiKeys[0]);
+    } else if (this.customApiKeys.length > 1) {
+      maskedCustomKeySummary = `${this.maskKey(this.customApiKeys[0])} (+${this.customApiKeys.length - 1} keys dự phòng)`;
+    }
+
     const tokenStats: TokenStatsSummary = cachedTokenStats || {
       totalTokens: overallTokens,
       totalPromptTokens: maskedKeys.reduce((acc, k) => acc + k.promptTokens, 0),
@@ -499,12 +658,13 @@ export class GeminiService {
         maskedKeys.reduce((acc, k) => acc + k.requestCount, 0) > 0
           ? Math.round(overallTokens / maskedKeys.reduce((acc, k) => acc + k.requestCount, 0))
           : 0,
-      activeKeysCount: activeKeyCount,
+      activeKeysCount: this.providerType === 'third_party' ? customMaskedKeys.filter(k => !k.isCooldown).length : activeKeyCount,
       historicalKeysCount: usageMap.size,
     };
 
     return {
       isLiveConfigured: isLive,
+      providerType: this.providerType,
       activeModel: this.activeModel,
       activeEmbeddingModel: this.activeEmbeddingModel,
       maskedApiKey: maskedKeySummary,
@@ -514,6 +674,14 @@ export class GeminiService {
       keyPool: maskedKeys,
       supportedModels: this.SUPPORTED_MODELS,
       tokenStats,
+      // Third-Party Gateway settings
+      customBaseUrl: this.customBaseUrl,
+      customModelName: this.customModelName,
+      hasCustomApiKey: this.customApiKeys.length > 0,
+      customKeyCount: this.customApiKeys.length,
+      maskedCustomKey: maskedCustomKeySummary,
+      customKeyPool: customMaskedKeys,
+      thirdPartyPresets: this.THIRD_PARTY_PRESETS,
     };
   }
 
@@ -524,8 +692,38 @@ export class GeminiService {
     apiKey?: string;
     modelName?: string;
     embeddingModel?: string;
+    providerType?: 'google_official' | 'third_party';
+    customBaseUrl?: string;
+    customApiKey?: string;
+    customModelName?: string;
   }): Promise<void> {
-    const { apiKey, modelName, embeddingModel } = params;
+    const {
+      apiKey,
+      modelName,
+      embeddingModel,
+      providerType,
+      customBaseUrl,
+      customApiKey,
+      customModelName,
+    } = params;
+
+    if (providerType !== undefined) {
+      this.providerType = providerType;
+    }
+    if (customBaseUrl !== undefined && customBaseUrl.trim() !== '') {
+      this.customBaseUrl = customBaseUrl.trim();
+    }
+    if (customApiKey !== undefined && customApiKey.trim() !== '') {
+      const parsedCustom = this.parseKeys(customApiKey);
+      if (parsedCustom.length > 0) {
+        this.customApiKeys = parsedCustom;
+        this.customRoundRobinIndex = 0;
+        this.customKeyCooldowns.clear();
+      }
+    }
+    if (customModelName !== undefined && customModelName.trim() !== '') {
+      this.customModelName = customModelName.trim();
+    }
 
     if (apiKey !== undefined && apiKey.trim() !== '') {
       const parsedKeys = this.parseKeys(apiKey);
@@ -547,19 +745,28 @@ export class GeminiService {
 
     // Persist to DB
     const keysToStore = apiKey !== undefined ? (apiKey.trim() || null) : (this.activeApiKeys.join('\n') || null);
+    const customKeysToStore = customApiKey !== undefined ? (customApiKey.trim() || null) : (this.customApiKeys.join('\n') || null);
 
     await query(
-      `INSERT INTO ai_settings (id, api_key, model_name, embedding_model, updated_at)
-       VALUES ('default', $1, $2, $3, NOW())
+      `INSERT INTO ai_settings (id, api_key, model_name, embedding_model, provider_type, custom_base_url, custom_api_key, custom_model_name, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5, $6, $7, NOW())
        ON CONFLICT (id) DO UPDATE
        SET api_key = COALESCE($1, ai_settings.api_key),
            model_name = COALESCE($2, ai_settings.model_name),
            embedding_model = COALESCE($3, ai_settings.embedding_model),
+           provider_type = COALESCE($4, ai_settings.provider_type),
+           custom_base_url = COALESCE($5, ai_settings.custom_base_url),
+           custom_api_key = COALESCE($6, ai_settings.custom_api_key),
+           custom_model_name = COALESCE($7, ai_settings.custom_model_name),
            updated_at = NOW()`,
       [
         keysToStore,
         modelName !== undefined ? modelName.trim() : null,
         embeddingModel !== undefined ? embeddingModel.trim() : null,
+        providerType !== undefined ? providerType : null,
+        customBaseUrl !== undefined ? customBaseUrl.trim() : null,
+        customKeysToStore,
+        customModelName !== undefined ? customModelName.trim() : null,
       ]
     );
   }
@@ -567,7 +774,32 @@ export class GeminiService {
   /**
    * Removes an API key by 1-based index from the active pool and persists to DB
    */
-  public static async removeKeyByIndex(index: number): Promise<void> {
+  public static async removeKeyByIndex(
+    index: number,
+    provider: 'google_official' | 'third_party' = 'google_official'
+  ): Promise<void> {
+    if (provider === 'third_party') {
+      if (index < 1 || index > this.customApiKeys.length) {
+        throw new Error(`Chỉ số Token bên thứ 3 không hợp lệ (#${index}).`);
+      }
+      const removedKey = this.customApiKeys[index - 1];
+      this.customApiKeys.splice(index - 1, 1);
+      this.customKeyCooldowns.delete(removedKey);
+      this.customRoundRobinIndex = 0;
+
+      const newKeyString = this.customApiKeys.length > 0 ? this.customApiKeys.join('\n') : null;
+
+      await query(
+        `INSERT INTO ai_settings (id, custom_api_key, updated_at)
+         VALUES ('default', $1, NOW())
+         ON CONFLICT (id) DO UPDATE
+         SET custom_api_key = $1,
+             updated_at = NOW()`,
+        [newKeyString]
+      );
+      return;
+    }
+
     if (index < 1 || index > this.activeApiKeys.length) {
       throw new Error(`Chỉ số API Key không hợp lệ (#${index}).`);
     }
@@ -593,7 +825,24 @@ export class GeminiService {
   /**
    * Clears all API keys from active pool and resets to Mock mode
    */
-  public static async clearAllKeys(): Promise<void> {
+  public static async clearAllKeys(
+    provider: 'google_official' | 'third_party' = 'google_official'
+  ): Promise<void> {
+    if (provider === 'third_party') {
+      this.customApiKeys = [];
+      this.customKeyCooldowns.clear();
+      this.customRoundRobinIndex = 0;
+
+      await query(
+        `INSERT INTO ai_settings (id, custom_api_key, updated_at)
+         VALUES ('default', NULL, NOW())
+         ON CONFLICT (id) DO UPDATE
+         SET custom_api_key = NULL,
+             updated_at = NOW()`
+      );
+      return;
+    }
+
     this.activeApiKeys = [];
     this.keyCooldowns.clear();
     this.clientsCache.clear();
@@ -730,7 +979,254 @@ export class GeminiService {
   }
 
   public static isLiveApiConfigured(): boolean {
+    if (this.providerType === 'third_party') {
+      return this.customApiKeys.length > 0;
+    }
     return this.activeApiKeys.length > 0;
+  }
+
+  /**
+   * Tests connection for third party OpenAI-compatible endpoints (RouteAPI, OpenRouter, etc.)
+   */
+  public static async testThirdPartyConnection(params: {
+    baseUrl: string;
+    keys: string[];
+    model: string;
+  }): Promise<MultiKeyTestResponse> {
+    const { baseUrl, keys, model } = params;
+    const cleanBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+    const endpoint = cleanBaseUrl.endsWith('/chat/completions')
+      ? cleanBaseUrl
+      : `${cleanBaseUrl}/chat/completions`;
+
+    if (keys.length === 0) {
+      return {
+        success: false,
+        message: 'Chưa có API Token của bên thứ 3. Vui lòng nhập ít nhất một Token để kiểm tra kết nối.',
+        modelUsed: model,
+        totalKeys: 0,
+        workingKeys: 0,
+        results: [],
+      };
+    }
+
+    const results: KeyTestResult[] = [];
+    let workingKeys = 0;
+    const overallStartTime = Date.now();
+
+    for (let idx = 0; idx < keys.length; idx++) {
+      const key = keys[idx];
+      const masked = this.maskKey(key);
+      const keyStartTime = Date.now();
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${key.trim()}`,
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              {
+                role: 'user',
+                content: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
+              },
+            ],
+            max_tokens: 60,
+            temperature: 0.7,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        const responseTimeMs = Date.now() - keyStartTime;
+
+        if (response.ok) {
+          const data = (await response.json()) as any;
+          const replyText =
+            data.choices?.[0]?.message?.content ||
+            data.choices?.[0]?.text ||
+            'Kết nối thành công.';
+          workingKeys++;
+
+          results.push({
+            index: idx + 1,
+            maskedKey: masked,
+            success: true,
+            modelUsed: model,
+            responseTimeMs,
+            message: `Sẵn sàng (${responseTimeMs}ms): "${replyText.trim().substring(0, 80)}"`,
+            status: 'ready',
+          });
+        } else {
+          const errBody = await response.text().catch(() => '');
+          let status: 'quota_exceeded' | 'unavailable' | 'error' = 'error';
+          if (response.status === 429) {
+            status = 'quota_exceeded';
+          } else if (response.status === 503 || response.status === 502 || response.status === 504) {
+            status = 'unavailable';
+          }
+
+          results.push({
+            index: idx + 1,
+            maskedKey: masked,
+            success: false,
+            modelUsed: model,
+            responseTimeMs,
+            message: `Lỗi HTTP ${response.status}: ${errBody.substring(0, 120) || response.statusText}`,
+            error: errBody || response.statusText,
+            status,
+          });
+        }
+      } catch (err: any) {
+        const responseTimeMs = Date.now() - keyStartTime;
+        results.push({
+          index: idx + 1,
+          maskedKey: masked,
+          success: false,
+          modelUsed: model,
+          responseTimeMs,
+          message: `Lỗi kết nối: ${err.message || 'Không phản hồi'}`,
+          error: err.message,
+          status: 'error',
+        });
+      }
+    }
+
+    const overallResponseTimeMs = Date.now() - overallStartTime;
+    const isOverallSuccess = workingKeys > 0;
+
+    let summaryMessage = '';
+    if (workingKeys === keys.length) {
+      summaryMessage = `Tất cả ${workingKeys}/${keys.length} API Token bên thứ ba (${cleanBaseUrl}) đều hoạt động xuất sắc với mô hình ${model}!`;
+    } else if (workingKeys > 0) {
+      summaryMessage = `Đã xác thực thành công ${workingKeys}/${keys.length} API Token bên thứ ba.`;
+    } else {
+      summaryMessage = `Toàn bộ ${keys.length} API Token bên thứ ba đều không thể kết nối tới ${cleanBaseUrl}. Vui lòng kiểm tra lại Token hoặc Base URL.`;
+    }
+
+    return {
+      success: isOverallSuccess,
+      message: summaryMessage,
+      modelUsed: model,
+      totalKeys: keys.length,
+      workingKeys,
+      responseTimeMs: Math.round(overallResponseTimeMs / keys.length),
+      results,
+    };
+  }
+
+  /**
+   * Calls Third-Party Chat Completions (RouteAPI, OpenRouter, etc.)
+   */
+  public static async callThirdPartyChatCompletions(params: {
+    systemInstruction?: string;
+    groundingPrompt: string;
+    workTitle: string;
+  }): Promise<{
+    text: string;
+    tokenCount: number;
+    promptTokens: number;
+    outputTokens: number;
+    modelUsed: string;
+    apiKeyMasked: string;
+  }> {
+    const { systemInstruction, groundingPrompt } = params;
+    const candidateKeys = this.getThirdPartyCandidateKeys();
+    if (candidateKeys.length === 0) {
+      throw new Error('Chưa cấu hình API Key bên thứ 3.');
+    }
+
+    const cleanBaseUrl = this.customBaseUrl.trim().replace(/\/+$/, '');
+    const endpoint = cleanBaseUrl.endsWith('/chat/completions')
+      ? cleanBaseUrl
+      : `${cleanBaseUrl}/chat/completions`;
+
+    const modelToUse = this.customModelName.trim() || 'google/gemini-2.5-flash';
+    let lastError: any = null;
+
+    for (let i = 0; i < candidateKeys.length; i++) {
+      const currentKey = candidateKeys[i];
+      try {
+        await this.throttleRequest();
+
+        const messages: Array<{ role: string; content: string }> = [];
+        if (systemInstruction && systemInstruction.trim()) {
+          messages.push({ role: 'system', content: systemInstruction.trim() });
+        }
+        messages.push({ role: 'user', content: groundingPrompt });
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentKey.trim()}`,
+          },
+          body: JSON.stringify({
+            model: modelToUse,
+            messages,
+            temperature: 0.7,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          if (response.status === 429) {
+            this.markThirdPartyKeyCooldown(currentKey, 60000);
+          }
+          throw new Error(`HTTP ${response.status} from ${cleanBaseUrl}: ${errText.substring(0, 150)}`);
+        }
+
+        const data = (await response.json()) as any;
+        const text = data.choices?.[0]?.message?.content || '';
+        const pTokens = data.usage?.prompt_tokens ?? Math.ceil(groundingPrompt.length / 4);
+        const oTokens = data.usage?.completion_tokens ?? Math.ceil(text.length / 4);
+        const totalTokens = data.usage?.total_tokens ?? (pTokens + oTokens);
+
+        await this.recordKeyUsage({
+          key: currentKey,
+          promptTokens: pTokens,
+          outputTokens: oTokens,
+          success: true,
+        });
+
+        let hostName = 'gateway';
+        try {
+          hostName = new URL(cleanBaseUrl).hostname;
+        } catch {}
+
+        return {
+          text,
+          tokenCount: totalTokens,
+          promptTokens: pTokens,
+          outputTokens: oTokens,
+          modelUsed: `${modelToUse} (${hostName})`,
+          apiKeyMasked: this.maskKey(currentKey),
+        };
+      } catch (err: any) {
+        lastError = err;
+        await this.recordKeyUsage({
+          key: currentKey,
+          promptTokens: 0,
+          outputTokens: 0,
+          success: false,
+        });
+        console.warn(`[GeminiService] ThirdParty key error:`, err.message);
+      }
+    }
+
+    throw lastError || new Error('Tất cả API Key bên thứ 3 đều gặp lỗi.');
   }
 
   /**
@@ -738,8 +1234,35 @@ export class GeminiService {
    */
   public static async testConnection(
     customApiKey?: string,
-    customModel?: string
+    customModel?: string,
+    options?: {
+      providerType?: 'google_official' | 'third_party';
+      customBaseUrl?: string;
+      customApiKey?: string;
+      customModelName?: string;
+    }
   ): Promise<MultiKeyTestResponse> {
+    const targetProvider = options?.providerType || this.providerType;
+
+    if (targetProvider === 'third_party') {
+      const baseUrl = options?.customBaseUrl || this.customBaseUrl;
+      const rawKeys = options?.customApiKey || customApiKey;
+      const keysToTest =
+        rawKeys && rawKeys.trim() !== ''
+          ? this.parseKeys(rawKeys)
+          : this.customApiKeys;
+      const modelToTest =
+        options?.customModelName?.trim() ||
+        customModel?.trim() ||
+        this.customModelName;
+
+      return this.testThirdPartyConnection({
+        baseUrl,
+        keys: keysToTest,
+        model: modelToTest,
+      });
+    }
+
     const keysToTest =
       customApiKey && customApiKey.trim() !== ''
         ? this.parseKeys(customApiKey)
@@ -1019,7 +1542,154 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
   }
 
   /**
-   * Executes RAG Interaction with File Search tool
+   * Quote Verification Engine and Citation Builder
+   */
+  private static verifyAndBuildRagResult(params: {
+    fullResponseText: string;
+    workTitle: string;
+    primaryDoc?: {
+      id: string;
+      title: string;
+      version: number;
+      paragraphs: ParagraphRow[];
+    };
+    referenceDocs?: Array<{
+      id: string;
+      title: string;
+      referenceType?: string | null;
+      rawContent: string | null;
+    }>;
+    tokenCount: number;
+    actualModelUsed: string;
+    apiKeyMasked?: string;
+    fileSearchStoreNames?: string[];
+    toolActuallyUsed?: boolean;
+    initialCitations?: FileCitationMeta[];
+  }): RagResult {
+    const {
+      fullResponseText,
+      workTitle,
+      primaryDoc,
+      referenceDocs = [],
+      tokenCount,
+      actualModelUsed,
+      apiKeyMasked,
+      fileSearchStoreNames = [],
+      toolActuallyUsed = true,
+      initialCitations = [],
+    } = params;
+
+    const primaryParagraphs = primaryDoc ? primaryDoc.paragraphs : [];
+    const refSnippets = (referenceDocs || []).map((r) => ({ title: r.title, text: r.rawContent || '' }));
+
+    const primaryCitations: PrimaryCitationMeta[] = [];
+    const referenceCitations: ReferenceCitationMeta[] = (referenceDocs || []).map((r) => ({
+      documentTitle: r.title,
+      referenceType: r.referenceType || 'analysis',
+      role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
+    }));
+
+    let verifiedResponseText = fullResponseText;
+    const blockquotes = Array.from(fullResponseText.matchAll(/>\s*["“]([^"”\n]+)["”]/g));
+
+    for (const match of blockquotes) {
+      const fullQuoteBlock = match[0];
+      const rawQuote = match[1].trim();
+
+      if (primaryParagraphs.length > 0) {
+        const vResult = ParagraphService.verifyQuote({
+          quote: rawQuote,
+          primaryParagraphs,
+          referenceSnippets: refSnippets,
+        });
+
+        if (vResult.verified && vResult.matchedParagraph) {
+          primaryCitations.push({
+            documentTitle: primaryDoc!.title,
+            version: primaryDoc!.version,
+            quote: rawQuote,
+            pageNumber: vResult.matchedParagraph.page_number,
+            paragraphOrder: vResult.matchedParagraph.paragraph_order,
+            verified: true,
+            contextSnippet: vResult.matchedParagraph.content,
+          });
+        } else {
+          // Strip unverified quote from output
+          verifiedResponseText = verifiedResponseText.replace(fullQuoteBlock, '');
+        }
+      }
+    }
+
+    verifiedResponseText = verifiedResponseText.replace(/\n{3,}/g, '\n\n').trim();
+
+    // Populate legacy citations array for backward compatibility
+    const legacyCitations: FileCitationMeta[] = [];
+    if (primaryCitations.length > 0) {
+      for (const pc of primaryCitations) {
+        legacyCitations.push({
+          fileName:
+            pc.documentTitle +
+            ` (Văn bản gốc - Đoạn #${pc.paragraphOrder}${pc.pageNumber ? `, Trang ${pc.pageNumber}` : ''})`,
+          sourceText: pc.quote,
+        });
+      }
+    }
+    for (const rc of referenceCitations) {
+      legacyCitations.push({
+        fileName: rc.documentTitle + ` (Tài liệu tham khảo)`,
+      });
+    }
+    if (legacyCitations.length === 0 && initialCitations.length > 0) {
+      legacyCitations.push(...initialCitations);
+    }
+
+    // Grounding verification rule
+    const lower = verifiedResponseText.toLowerCase();
+    const mentionsLackOfDocs =
+      lower.includes('chưa đủ thông tin') ||
+      lower.includes('không có thông tin') ||
+      lower.includes('tài liệu không nhắc') ||
+      lower.includes('không tìm thấy trong tài liệu') ||
+      lower.includes('chưa tìm thấy căn cứ');
+
+    const isNoSource = legacyCitations.length === 0 || mentionsLackOfDocs;
+
+    if (isNoSource && !mentionsLackOfDocs) {
+      const strictRefusal = `Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm "${workTitle}", cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!`;
+      return {
+        text: strictRefusal,
+        hasCitations: false,
+        citations: [],
+        primaryCitations: [],
+        referenceCitations: [],
+        tokenCount,
+        apiKeyMasked,
+        isNoSource: true,
+        toolConfigured: fileSearchStoreNames.length > 0,
+        toolActuallyUsed,
+        modelUsed: actualModelUsed,
+        isLiveAi: true,
+      };
+    }
+
+    return {
+      text: verifiedResponseText,
+      hasCitations: legacyCitations.length > 0,
+      citations: legacyCitations,
+      primaryCitations,
+      referenceCitations,
+      tokenCount,
+      apiKeyMasked,
+      isNoSource,
+      toolConfigured: fileSearchStoreNames.length > 0,
+      toolActuallyUsed,
+      modelUsed: actualModelUsed,
+      isLiveAi: true,
+    };
+  }
+
+  /**
+   * Executes RAG Interaction with File Search tool or Third-Party Provider
    */
   static async executeRagQuery(params: {
     workTitle: string;
@@ -1057,8 +1727,129 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
       chatHistory = [],
     } = params;
 
-    const candidateKeys = this.getCandidateApiKeys();
     const systemInstruction = this.buildSystemInstruction(learningMode, workTitle, prepReviewSettings);
+
+    // ==========================================
+    // BRANCH A: THIRD-PARTY GATEWAY (ROUTEAPI / OPENROUTER...)
+    // ==========================================
+    if (this.providerType === 'third_party') {
+      if (this.customApiKeys.length === 0) {
+        const mockRes = this.runMockFileSearch({
+          workTitle,
+          studentQuestion,
+          learningMode,
+          authorizedDocumentTitles,
+          mockDocumentSnippets,
+          primaryDoc,
+          referenceDocs,
+          chatHistory,
+        });
+        return {
+          ...mockRes,
+          isLiveAi: false,
+          modelUsed: 'Bên thứ 3 (Chưa cấu hình API Token)',
+        };
+      }
+
+      let documentContext = '';
+      if (primaryDoc) {
+        documentContext +=
+          `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC (NGUỒN DUY NHẤT ĐƯỢC PHÉP TRÍCH NGUYÊN VĂN) ===\n` +
+          `Tiêu đề: "${primaryDoc.title}" (Phiên bản: ${primaryDoc.version})\n` +
+          (primaryDoc.rawContent ||
+            primaryDoc.paragraphs
+              .map((p) => `[Đoạn ${p.paragraph_order}${p.page_number ? ` - Trang ${p.page_number}` : ''}]: ${p.content}`)
+              .join('\n\n'));
+      }
+
+      if (referenceDocs && referenceDocs.length > 0) {
+        documentContext +=
+          `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH (CHỈ DÙNG BỔ TRỢ LUẬN ĐIỂM, KHÔNG TRÍCH LÀM LỜI TÁC PHẨM) ===\n` +
+          referenceDocs
+            .map(
+              (d) =>
+                `[TÀI LIỆU THAM KHẢO: "${d.title}" | PHÂN LOẠI: ${d.referenceType || 'Tài liệu bổ trợ'}]:\n${d.rawContent || ''}`
+            )
+            .join('\n\n---\n\n');
+      } else if (mockDocumentSnippets.length > 0 && !primaryDoc) {
+        documentContext += `\n\n[TÀI LIỆU HỌC TẬP CHÍNH THỐNG ĐƯỢC GIÁO VIÊN CUNG CẤP]:\n${mockDocumentSnippets.join(
+          '\n\n---\n\n'
+        )}`;
+      }
+
+      const formattedHistory =
+        chatHistory && chatHistory.length > 0
+          ? `\n\n[NGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ GIỮA CÔ VÀ EM]:\n` +
+            chatHistory
+              .slice(-6)
+              .map((h) => `${h.sender === 'user' ? 'Em' : 'Cô Dương'}: ${h.text}`)
+              .join('\n\n') +
+            `\n\n[CÂU HỎI TIẾP THEO HIỆN TẠI CỦA EM]:\n"${studentQuestion}"`
+          : `\n\n[CÂU HỎI HIỆN TẠI CỦA EM HỌC SINH]:\n"${studentQuestion}"`;
+
+      const groundingPrompt = `
+[NGỮ CẢNH HỌC TẬP & TÀI LIỆU CHÍNH THỐNG (CONTEXTUAL RAG)]:
+Tác phẩm: "${workTitle}"
+${documentContext}
+${formattedHistory}
+
+[YÊU CẦU BẮT BUỘC VỀ NGUỒN TÀI LIỆU & TRÍCH DẪN]:
+1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC:
+   - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ở trên (đặt trong khối markdown > "...").
+   - TUYỆT ĐỐI KHÔNG trích nguyên văn từ tài liệu tham khảo/phân tích giả mạo thành lời văn tác phẩm.
+   - Nếu không có câu trích phù hợp, cô hãy diễn giải dựa trên chi tiết có căn cứ, không bắt buộc ép trích dẫn.
+2. TRẢ LỜI LIỀN MẠCH, THẤU ĐÁO THEO NGỮ CẢNH HỘI THOẠI:
+   - Dựa trên lịch sử trao đổi trên để hiểu các câu hỏi nối tiếp của em.
+   - Hãy trả lời trực tiếp, giải thích rõ ràng, phân tích sâu sắc vào câu hỏi của em.
+3. NẾU THIẾU CĂN CỨ:
+   - Nếu câu hỏi hoàn toàn xa lạ hoặc không có trong tài liệu bài học, hãy từ chối lịch sự bằng câu:
+     "Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm '${workTitle}', cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!"
+4. GIỌNG VĂN SƯ PHẠM TRUYỀN CẢM:
+   - Xưng "cô", gọi "em". Ấm áp, tận tâm, truyền cảm hứng văn học.
+`;
+
+      try {
+        const thirdPartyRes = await this.callThirdPartyChatCompletions({
+          systemInstruction,
+          groundingPrompt,
+          workTitle,
+        });
+
+        return this.verifyAndBuildRagResult({
+          fullResponseText: thirdPartyRes.text,
+          workTitle,
+          primaryDoc,
+          referenceDocs,
+          tokenCount: thirdPartyRes.tokenCount,
+          actualModelUsed: thirdPartyRes.modelUsed,
+          apiKeyMasked: thirdPartyRes.apiKeyMasked,
+          fileSearchStoreNames,
+          toolActuallyUsed: true,
+        });
+      } catch (tpErr: any) {
+        console.error('[GeminiService] ThirdParty call failed, fallback to mock:', tpErr);
+        const mockRes = this.runMockFileSearch({
+          workTitle,
+          studentQuestion,
+          learningMode,
+          authorizedDocumentTitles,
+          mockDocumentSnippets,
+          primaryDoc,
+          referenceDocs,
+          chatHistory,
+        });
+        return {
+          ...mockRes,
+          isLiveAi: false,
+          modelUsed: `Bên thứ 3 lỗi (${tpErr.message || 'Error'}) - Ngoại tuyến`,
+        };
+      }
+    }
+
+    // ==========================================
+    // BRANCH B: GOOGLE OFFICIAL GEMINI SDK
+    // ==========================================
+    const candidateKeys = this.getCandidateApiKeys();
 
     // 1. If no live API keys configured, run high-fidelity simulated File Search RAG
     if (candidateKeys.length === 0) {
@@ -1288,112 +2079,18 @@ ${formattedHistory}
           }
         }
 
-        // Quote Verification Engine: check all blockquotes against primary text
-        const primaryParagraphs = primaryDoc ? primaryDoc.paragraphs : [];
-        const refSnippets = (referenceDocs || []).map(r => ({ title: r.title, text: r.rawContent || '' }));
-
-        const primaryCitations: PrimaryCitationMeta[] = [];
-        const referenceCitations: ReferenceCitationMeta[] = (referenceDocs || []).map(r => ({
-          documentTitle: r.title,
-          referenceType: r.referenceType || 'analysis',
-          role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
-        }));
-
-        let verifiedResponseText = fullResponseText;
-        const blockquotes = Array.from(fullResponseText.matchAll(/>\s*["“]([^"”\n]+)["”]/g));
-
-        for (const match of blockquotes) {
-          const fullQuoteBlock = match[0];
-          const rawQuote = match[1].trim();
-
-          if (primaryParagraphs.length > 0) {
-            const vResult = ParagraphService.verifyQuote({
-              quote: rawQuote,
-              primaryParagraphs,
-              referenceSnippets: refSnippets,
-            });
-
-            if (vResult.verified && vResult.matchedParagraph) {
-              primaryCitations.push({
-                documentTitle: primaryDoc!.title,
-                version: primaryDoc!.version,
-                quote: rawQuote,
-                pageNumber: vResult.matchedParagraph.page_number,
-                paragraphOrder: vResult.matchedParagraph.paragraph_order,
-                verified: true,
-                contextSnippet: vResult.matchedParagraph.content,
-              });
-            } else {
-              // Strip unverified quote from output
-              verifiedResponseText = verifiedResponseText.replace(fullQuoteBlock, '');
-            }
-          }
-        }
-
-        verifiedResponseText = verifiedResponseText.replace(/\n{3,}/g, '\n\n').trim();
-
-        // Populate legacy citations array for backward compatibility
-        const legacyCitations: FileCitationMeta[] = [];
-        if (primaryCitations.length > 0) {
-          for (const pc of primaryCitations) {
-            legacyCitations.push({
-              fileName: pc.documentTitle + ` (Văn bản gốc - Đoạn #${pc.paragraphOrder}${pc.pageNumber ? `, Trang ${pc.pageNumber}` : ''})`,
-              sourceText: pc.quote,
-            });
-          }
-        }
-        for (const rc of referenceCitations) {
-          legacyCitations.push({
-            fileName: rc.documentTitle + ` (Tài liệu tham khảo)`,
-          });
-        }
-        if (legacyCitations.length === 0 && citations.length > 0) {
-          legacyCitations.push(...citations);
-        }
-
-        // Grounding verification rule
-        const lower = verifiedResponseText.toLowerCase();
-        const mentionsLackOfDocs =
-          lower.includes('chưa đủ thông tin') ||
-          lower.includes('không có thông tin') ||
-          lower.includes('tài liệu không nhắc') ||
-          lower.includes('không tìm thấy trong tài liệu') ||
-          lower.includes('chưa tìm thấy căn cứ');
-
-        const isNoSource = legacyCitations.length === 0 || mentionsLackOfDocs;
-
-        if (isNoSource && !mentionsLackOfDocs) {
-          const strictRefusal = `Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm "${workTitle}", cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!`;
-          return {
-            text: strictRefusal,
-            hasCitations: false,
-            citations: [],
-            primaryCitations: [],
-            referenceCitations: [],
-            tokenCount,
-            apiKeyMasked: this.maskKey(currentKey),
-            isNoSource: true,
-            toolConfigured: fileSearchStoreNames.length > 0,
-            toolActuallyUsed,
-            modelUsed: actualModelUsed,
-            isLiveAi: true,
-          };
-        }
-
-        return {
-          text: verifiedResponseText,
-          hasCitations: legacyCitations.length > 0,
-          citations: legacyCitations,
-          primaryCitations,
-          referenceCitations,
+        return this.verifyAndBuildRagResult({
+          fullResponseText,
+          workTitle,
+          primaryDoc,
+          referenceDocs,
           tokenCount,
+          actualModelUsed,
           apiKeyMasked: this.maskKey(currentKey),
-          isNoSource,
-          toolConfigured: fileSearchStoreNames.length > 0,
+          fileSearchStoreNames,
           toolActuallyUsed,
-          modelUsed: actualModelUsed,
-          isLiveAi: true,
-        };
+          initialCitations: citations,
+        });
       } catch (keyErr: any) {
         lastApiError = keyErr;
         console.warn(
