@@ -483,7 +483,7 @@ export class AdminController {
       customApiKey,
       customModelName,
     });
-    res.status(result.success ? 200 : 400).json(result);
+    res.status(200).json(result);
   }
 
   /**

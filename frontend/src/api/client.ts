@@ -50,10 +50,14 @@ export async function apiRequest<T = any>(
   const data = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
-    const errorMsg = (data && typeof data === 'object' && data.error) ? data.error : response.statusText || 'Lỗi kết nối máy chủ.';
+    const errorMsg =
+      data && typeof data === 'object' && (data.error || data.message)
+        ? data.error || data.message
+        : response.statusText || 'Lỗi kết nối máy chủ.';
     const err = new Error(errorMsg) as any;
     err.status = response.status;
     err.code = data?.code;
+    err.data = data;
     throw err;
   }
 

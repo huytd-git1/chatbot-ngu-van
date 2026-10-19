@@ -403,7 +403,10 @@ export const AdminDashboard: React.FC = () => {
       setTestResult({
         loading: false,
         success: false,
-        message: err.message || 'Không thể kết nối tới nhà cung cấp AI.',
+        message: err.data?.message || err.message || 'Không thể kết nối tới nhà cung cấp AI.',
+        results: err.data?.results,
+        totalKeys: err.data?.totalKeys,
+        workingKeys: err.data?.workingKeys,
       });
     }
   };
