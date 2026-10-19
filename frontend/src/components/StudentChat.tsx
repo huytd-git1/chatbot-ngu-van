@@ -43,15 +43,17 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
   // Fetch auto-generated study suggestions directly from teacher reference documents
   useEffect(() => {
+    // Immediately clear previous work's suggestions to prevent leakage
+    setDocSuggestions([]);
+
     if (!selectedWorkId) {
-      setDocSuggestions([]);
       return;
     }
     let isMounted = true;
     apiRequest<{ suggestions: string[] }>(`/api/student/works/${selectedWorkId}/suggestions`)
       .then((res) => {
-        if (isMounted && res.suggestions && res.suggestions.length > 0) {
-          setDocSuggestions(res.suggestions);
+        if (isMounted) {
+          setDocSuggestions(res?.suggestions || []);
         }
       })
       .catch(() => {
@@ -439,7 +441,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
               <div className="w-full max-w-xl mb-3">
                 <div className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wider mb-2 flex items-center justify-center gap-1.5">
                   <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                  Gợi ý trực tiếp từ tài liệu giáo viên đã cấp ({docSuggestions.length})
+                  Gợi ý từ tài liệu tham khảo "{activeWork?.title || 'tác phẩm'}" ({docSuggestions.length})
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
                   {docSuggestions.map((s, idx) => (

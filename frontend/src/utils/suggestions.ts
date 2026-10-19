@@ -377,6 +377,39 @@ const WORK_KNOWLEDGE_BASE: Record<string, WorkKnowledge> = {
       'Ôn tập: Thông điệp nhân văn về tình người và niềm khát khao hạnh phúc trong Vợ nhặt',
     ],
   },
+  'chi_pheo': {
+    aliases: ['chí phèo', 'chi pheo', 'nam cao', 'bá kiến', 'thị nở', 'làng vũ đại'],
+    qa: [
+      'Ý nghĩa tiếng chửi của Chí Phèo ở phần mở đầu tác phẩm',
+      'Ý nghĩa hình tượng "Bát cháo hành" của Thị Nở và sự thức tỉnh của Chí Phèo',
+      'Quá trình tha hóa của Chí Phèo từ nông dân lương thiện thành con quỷ dữ làng Vũ Đại',
+      'Bi kịch bị cự tuyệt quyền làm người và cái chết đầy bế tắc của Chí Phèo',
+    ],
+    character_analysis: [
+      'Phân tích nhân vật Chí Phèo qua 4 bước: lương thiện - tha hóa - thức tỉnh - bi kịch',
+      'Phân tích nhân vật Bá Kiến - điển hình sắc sảo cho giai cấp thống trị phong kiến',
+      'Phân tích nhân vật Thị Nở và vai trò cầu nối tình người đánh thức lương tri Chí Phèo',
+      'Nhận xét bi kịch tinh thần và nỗi đau đớn tột cùng khi bị từ chối làm người lương thiện',
+    ],
+    outline: [
+      'Gợi ý dàn ý 3 phần phân tích bi kịch tha hóa và cái chết của Chí Phèo',
+      'Dàn ý phân tích giá trị hiện thực và giá trị nhân đạo mới mẻ trong truyện ngắn Chí Phèo',
+      'Dàn ý bài văn nghị luận xã hội về khát vọng sống lương thiện từ tác phẩm Chí Phèo',
+    ],
+    reading_comprehension: [
+      'Luyện đọc hiểu đoạn trích tâm trạng Chí Phèo buổi sáng sau đêm gặp Thị Nở',
+      'Đọc hiểu câu hỏi day dứt cuối cùng của Chí Phèo: "Ai cho tao lương thiện?"',
+      'Luyện đọc hiểu tiếng chửi có thứ tự đặc biệt của Chí Phèo ở phần mở đầu',
+    ],
+    essay_feedback: [
+      'Góp ý đoạn văn phân tích giọt nước mắt và tiếng khóc ăn năn của Chí Phèo',
+      'Nhận xét đoạn bình luận về câu hỏi nhức nhối: "Ai cho tao lương thiện?"',
+    ],
+    prep_and_review: [
+      'Soạn bài: Tóm tắt các mốc thời gian và bước ngoặt cuộc đời của nhân vật Chí Phèo',
+      'Ôn tập: Đặc sắc nghệ thuật miêu tả tâm lý và ngôn ngữ trần thuật đa thanh của Nam Cao',
+    ],
+  },
   'song': {
     aliases: ['sóng', 'song', 'xuân quỳnh'],
     qa: [

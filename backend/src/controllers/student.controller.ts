@@ -345,9 +345,19 @@ export class StudentController {
     }
     const work = workRes.rows[0];
 
-    // 2. Fetch all ready documents
-    const docsRes = await query<{ title: string; doc_type: string; raw_content: string | null }>(
-      `SELECT title, doc_type, raw_content FROM documents WHERE work_id = $1 AND status = 'ready'`,
+    // 2. Fetch ready documents for this specific work, prioritizing reference / analysis / lesson_plan
+    // Per rule: only classified documents are used (document_role != 'unclassified')
+    const docsRes = await query<{
+      id: string;
+      title: string;
+      doc_type: string;
+      document_role: string;
+      raw_content: string | null;
+    }>(
+      `SELECT id, title, doc_type, document_role, raw_content
+       FROM documents
+       WHERE work_id = $1 AND status = 'ready' AND document_role != 'unclassified'
+       ORDER BY (CASE WHEN document_role = 'reference' THEN 0 ELSE 1 END), created_at ASC`,
       [workId]
     );
 
@@ -366,52 +376,109 @@ export class StudentController {
         );
         if (lsRes.rows.length > 0) {
           const row = lsRes.rows[0];
-          if (row.prep_questions) {
-            learningQuestions.push(...row.prep_questions.split('\n').map((q) => q.trim()).filter((q) => q.length > 10));
-          }
-          if (row.review_questions) {
-            learningQuestions.push(...row.review_questions.split('\n').map((q) => q.trim()).filter((q) => q.length > 10));
-          }
+          const parseList = (str: string | null | undefined): string[] => {
+            if (!str) return [];
+            try {
+              const parsed = JSON.parse(str);
+              if (Array.isArray(parsed)) return parsed.map((s) => String(s).trim()).filter(Boolean);
+            } catch {}
+            return str.split('\n').map((s) => s.trim()).filter(Boolean);
+          };
+          learningQuestions.push(...parseList(row.prep_questions));
+          learningQuestions.push(...parseList(row.review_questions));
         }
       }
     }
 
     const generatedSuggestions: string[] = [];
+    const normalizedSeen = new Set<string>();
 
-    // Prioritize explicit teacher learning questions
-    for (const q of learningQuestions) {
-      if (generatedSuggestions.length >= 4) break;
-      const cleanQ = q.replace(/^[-*•0-9.)\s]+/, '').trim();
-      if (cleanQ.length >= 12 && !generatedSuggestions.includes(cleanQ)) {
-        generatedSuggestions.push(cleanQ);
+    const addSuggestion = (candidate: string) => {
+      if (generatedSuggestions.length >= 6) return;
+      // Clean candidate
+      let clean = candidate
+        .replace(/^[#\-*•0-9.)\s]+/, '') // leading bullet/numbers
+        .replace(/^[a-z]\)\s*/i, '')     // leading a) b)
+        .replace(/[:;,\s]+$/, '')         // trailing punctuation
+        .trim();
+
+      if (clean.length < 12 || clean.length > 130) return;
+
+      // Filter out boilerplate noise
+      const lower = clean.toLowerCase();
+      if (
+        lower.startsWith('mục lục') ||
+        lower.startsWith('tài liệu tham khảo') ||
+        lower.startsWith('văn bản tác phẩm') ||
+        lower.startsWith('giáo viên') ||
+        lower.startsWith('năm học') ||
+        lower.startsWith('trang ') ||
+        lower.startsWith('tiết ') ||
+        lower.includes('ký hiệu kiểm chứng') ||
+        lower.includes('mã-cô-dương')
+      ) {
+        return;
       }
+
+      // Check normalization to prevent duplicate/similar suggestions
+      const normKey = lower.replace(/[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/gi, '');
+      if (normalizedSeen.has(normKey)) return;
+      normalizedSeen.add(normKey);
+
+      generatedSuggestions.push(clean);
+    };
+
+    // Step A: Add explicit teacher learning questions first
+    for (const q of learningQuestions) {
+      addSuggestion(q);
     }
 
-    // Extract questions and section headers from uploaded documents
+    // Step B: Offline heuristic extraction from teacher reference documents (no API calls, 0 token cost)
     for (const doc of docsRes.rows) {
+      if (generatedSuggestions.length >= 6) break;
       if (!doc.raw_content) continue;
+
       const lines = doc.raw_content.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
 
       for (const line of lines) {
         if (generatedSuggestions.length >= 6) break;
 
-        // Pattern A: Line ending with '?' (Question in teacher document)
-        if (line.endsWith('?') && line.length >= 15 && line.length <= 120) {
-          const cleanLine = line.replace(/^[0-9A-Za-z.)\-*•\s]+/, '').trim();
-          if (cleanLine.length >= 12 && !generatedSuggestions.includes(cleanLine)) {
-            generatedSuggestions.push(cleanLine);
-            continue;
-          }
+        // Pattern 1: Direct question line ending with '?'
+        if (line.endsWith('?') && line.length >= 15 && line.length <= 130) {
+          addSuggestion(line);
+          continue;
         }
 
-        // Pattern B: Main headings/sections like '1. Luận điểm...', 'I. Phân tích...', 'II. Giá trị...'
-        const headingMatch = line.match(/^(?:I|II|III|IV|V|1|2|3|4|5|A|B|C|Luận điểm \d+)[.:\s]+(.{15,90})$/i);
-        if (headingMatch) {
-          const topic = headingMatch[1].trim();
-          const q = `Phân tích nội dung: "${topic}"`;
-          if (!generatedSuggestions.includes(q)) {
-            generatedSuggestions.push(q);
+        // Pattern 2: Markdown headers: '# ...', '## ...', '### ...'
+        const mdHeaderMatch = line.match(/^#{1,4}\s+(.{10,100})$/);
+        if (mdHeaderMatch) {
+          const headerText = mdHeaderMatch[1].replace(/^[0-9IVXABC.)\s]+/, '').trim();
+          if (headerText.endsWith('?')) {
+            addSuggestion(headerText);
+          } else {
+            addSuggestion(`Phân tích nội dung: "${headerText}"`);
           }
+          continue;
+        }
+
+        // Pattern 3: Outlined sections like '1. HOÀN CẢNH SÁNG TÁC...', 'I. BI KỊCH...', 'Luận điểm 1:...'
+        const outlineMatch = line.match(/^(?:I|II|III|IV|V|VI|VII|1|2|3|4|5|6|A|B|C|Luận điểm \d+|Phần \d+)[.:\s]+(.{12,100})$/i);
+        if (outlineMatch) {
+          const topic = outlineMatch[1].trim();
+          if (topic.endsWith('?')) {
+            addSuggestion(topic);
+          } else {
+            addSuggestion(`Phân tích nội dung: "${topic}"`);
+          }
+          continue;
+        }
+
+        // Pattern 4: Key literature topic indicators at start of bullet/line
+        const litKeywordMatch = line.match(/^(?:[-*•]\s*)?(Phân tích|Cảm nhận|Ý nghĩa|Hình tượng|Nhân vật|Bi kịch|Giá trị hiện thực|Giá trị nhân đạo|Tình huống|Nghệ thuật)\s+([^.!?\n]{15,90})/i);
+        if (litKeywordMatch) {
+          const fullTopic = `${litKeywordMatch[1]} ${litKeywordMatch[2]}`.trim();
+          addSuggestion(fullTopic);
+          continue;
         }
       }
     }
