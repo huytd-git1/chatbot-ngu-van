@@ -684,6 +684,86 @@ export class TeacherController {
   }
 
   /**
+   * Download original raw text / markdown content of a document
+   */
+  static async downloadDocument(req: Request, res: Response): Promise<void> {
+    if (!req.user) {
+      res.status(401).json({ error: 'Chưa đăng nhập.' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    try {
+      const doc = await DocumentService.getDocumentForDownload(documentId);
+      if (!doc.raw_content) {
+        res.status(404).json({ error: 'Tài liệu này không có nội dung văn bản để tải về.' });
+        return;
+      }
+
+      const fileName = doc.file_name || `${doc.title}.txt`;
+      const isMd = fileName.toLowerCase().endsWith('.md');
+      res.setHeader('Content-Type', isMd ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+      res.send(doc.raw_content);
+    } catch (err: any) {
+      console.error('[TeacherController] downloadDocument error:', err);
+      res.status(500).json({ error: err.message || 'Lỗi khi tải tài liệu.' });
+    }
+  }
+
+  /**
+   * Re-upload / replace content of a document with a new .txt or .md file
+   */
+  static async reuploadDocument(req: Request, res: Response): Promise<void> {
+    if (!req.user) {
+      res.status(401).json({ error: 'Chưa đăng nhập.' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const file = req.file;
+
+    if (!file) {
+      res.status(400).json({ error: 'Vui lòng chọn tệp .txt hoặc .md mới để tải lại.' });
+      return;
+    }
+
+    const val = DocumentService.validateFile({
+      mimetype: file.mimetype,
+      size: file.size,
+      originalname: file.originalname,
+    });
+    if (!val.valid) {
+      res.status(400).json({ error: val.error });
+      return;
+    }
+
+    try {
+      const updated = await DocumentService.reuploadDocument({
+        documentId,
+        file: {
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          buffer: file.buffer,
+        },
+        userId: req.user.id,
+      });
+
+      res.status(200).json({
+        message: 'Đã tải lại và cập nhật nội dung văn bản thành công. Các đoạn văn đã được lập chỉ mục lại.',
+        document: updated,
+      });
+    } catch (err: any) {
+      console.error('[TeacherController] reuploadDocument error:', err);
+      res.status(500).json({ error: err.message || 'Lỗi khi tải lại tệp tài liệu.' });
+    }
+  }
+
+  /**
    * Get learning settings for class & work
    */
   static async getLearningSettings(req: Request, res: Response): Promise<void> {

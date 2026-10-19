@@ -41,6 +41,8 @@ teacherRouter.put('/documents/:documentId/activate-primary', TeacherController.a
 teacherRouter.put('/documents/:documentId/classification', TeacherController.updateDocumentClassification);
 teacherRouter.get('/documents/:documentId/paragraphs', TeacherController.getDocumentParagraphs);
 teacherRouter.get('/works/:workId/document-diff-report', TeacherController.getDocumentDiffReport);
+teacherRouter.get('/documents/:documentId/download', TeacherController.downloadDocument);
+teacherRouter.put('/documents/:documentId/reupload', upload.single('file'), TeacherController.reuploadDocument);
 teacherRouter.delete('/documents/:documentId', TeacherController.deleteDocument);
 
 // Learning settings

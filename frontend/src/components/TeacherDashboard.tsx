@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
 import {
   Download, RefreshCw, Lock, Unlock,
   KeyRound, Shield, FileText, CheckCircle2, AlertCircle, Trash2, Award, Calendar,
-  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info
+  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info, Upload
 } from 'lucide-react';
 import type { ClassItem, StudentItem, Work, DocumentItem, ParagraphItem, DocumentDiffReport } from '../types.js';
 import { apiRequest } from '../api/client.js';
@@ -45,6 +44,8 @@ export const TeacherDashboard: React.FC = () => {
   const [refType, setRefType] = useState<'analysis' | 'lesson_plan' | 'context' | 'qa_guide' | 'other'>('analysis');
   const [docFile, setDocFile] = useState<File | null>(null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [isReuploadingDocId, setIsReuploadingDocId] = useState<string | null>(null);
+  const [isRefreshingDocs, setIsRefreshingDocs] = useState(false);
 
   // Modals for OCR Paragraphs & Diff Report
   const [previewParagraphs, setPreviewParagraphs] = useState<ParagraphItem[]>([]);
@@ -282,9 +283,70 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
+  const handleRefreshDocuments = async (wId: string) => {
+    setIsRefreshingDocs(true);
+    await loadDocuments(wId);
+    setIsRefreshingDocs(false);
+  };
+
+  const handleDownloadDoc = async (docId: string, fileName?: string) => {
+    try {
+      const res = await fetch(`/api/teacher/documents/${docId}/download`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Không thể tải file' }));
+        throw new Error(err.error || 'Lỗi khi tải tài liệu.');
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'van_ban.txt';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      alert(err.message || 'Lỗi khi tải tài liệu.');
+    }
+  };
+
+  const handleReuploadDoc = async (docId: string, file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext !== 'txt' && ext !== 'md') {
+      alert('Định dạng tệp không hợp lệ! Hệ thống yêu cầu đầu vào nội dung bắt buộc là định dạng .txt hoặc .md (UTF-8).');
+      return;
+    }
+    setIsReuploadingDocId(docId);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiRequest(`/api/teacher/documents/${docId}/reupload`, {
+        method: 'PUT',
+        body: formData,
+      });
+      alert(res.message || 'Đã tải lại và cập nhật văn bản thành công!');
+      if (selectedWorkId) {
+        loadDocuments(selectedWorkId);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Lỗi khi tải lại tệp tài liệu.');
+    } finally {
+      setIsReuploadingDocId(null);
+    }
+  };
+
   const handleUploadDoc = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedWorkId || !docFile || !docTitle.trim()) return;
+
+    const ext = docFile.name.split('.').pop()?.toLowerCase();
+    if (ext !== 'txt' && ext !== 'md') {
+      alert('Định dạng tệp không hợp lệ! Hệ thống yêu cầu đầu vào nội dung khi thêm tài liệu bắt buộc là tệp .txt hoặc .md (UTF-8).');
+      return;
+    }
+
     setIsUploadingDoc(true);
     try {
       const formData = new FormData();
@@ -846,19 +908,28 @@ export const TeacherDashboard: React.FC = () => {
                     <span>Đối chiếu tài liệu</span>
                   </button>
                 )}
-                <button
-                  onClick={() => selectedWorkId && loadDocuments(selectedWorkId)}
-                  title="Làm mới trạng thái"
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                {selectedWorkId && (
+                  <button
+                    onClick={() => handleRefreshDocuments(selectedWorkId)}
+                    title="Tải lại danh sách tài liệu từ máy chủ"
+                    disabled={isRefreshingDocs}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-xs font-semibold cursor-pointer shadow-2xs transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingDocs ? 'animate-spin text-amber-600' : 'text-slate-600'}`} />
+                    <span>{isRefreshingDocs ? 'Đang tải lại...' : 'Tải lại danh sách'}</span>
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Upload form with Role & Subtype Selection */}
             <form onSubmit={handleUploadDoc} className="p-3.5 rounded-xl bg-[#fbf9f4] border border-[#e8e2d5] space-y-2.5">
-              <span className="text-xs font-semibold text-[#0f2942]">Tải tài liệu mới & phân loại vai trò:</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-[#0f2942]">Tải tài liệu mới & phân loại vai trò:</span>
+                <span className="text-[11px] text-amber-900 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 font-medium">
+                  Định dạng bắt buộc: <strong>.txt</strong> hoặc <strong>.md</strong> (UTF-8)
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input
                   type="text"
@@ -898,7 +969,7 @@ export const TeacherDashboard: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <input
                   type="file"
-                  accept=".txt,.md,.pdf,.docx,.csv"
+                  accept=".txt,.md"
                   onChange={(e) => setDocFile(e.target.files?.[0] || null)}
                   className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-900 cursor-pointer"
                 />
@@ -907,7 +978,7 @@ export const TeacherDashboard: React.FC = () => {
                   disabled={isUploadingDoc || !docFile || !docTitle.trim()}
                   className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#0f2942] text-white hover:bg-[#1e3a5f] disabled:opacity-40 shrink-0 shadow-2xs cursor-pointer ml-auto"
                 >
-                  {isUploadingDoc ? 'Đang tải & Lập chỉ mục...' : 'Tải lên & Lưu kho'}
+                  {isUploadingDoc ? 'Đang tải & Lập chỉ mục...' : 'Tải lên & Lưu kho (.txt/.md)'}
                 </button>
               </div>
             </form>
@@ -964,11 +1035,43 @@ export const TeacherDashboard: React.FC = () => {
 
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           <button
+                            onClick={() => handleDownloadDoc(activePrimary.id, activePrimary.file_name)}
+                            title="Tải văn bản về máy (.txt / .md)"
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 text-[11px] font-semibold hover:bg-emerald-100 transition-colors cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Tải về</span>
+                          </button>
+                          <label
+                            title="Tải lại / Cập nhật file .txt hoặc .md mới cho bản gốc này"
+                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold cursor-pointer transition-colors ${
+                              isReuploadingDocId === activePrimary.id
+                                ? 'bg-amber-100 border-amber-300 text-amber-800'
+                                : 'bg-white hover:bg-emerald-100 border-emerald-300 text-emerald-900'
+                            }`}
+                          >
+                            <Upload className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>{isReuploadingDocId === activePrimary.id ? 'Đang cập nhật...' : 'Tải lại tệp'}</span>
+                            <input
+                              type="file"
+                              accept=".txt,.md"
+                              className="hidden"
+                              disabled={isReuploadingDocId === activePrimary.id}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) {
+                                  handleReuploadDoc(activePrimary.id, f);
+                                  e.target.value = '';
+                                }
+                              }}
+                            />
+                          </label>
+                          <button
                             onClick={() => handleViewParagraphs(activePrimary)}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 text-[11px] font-semibold hover:bg-emerald-100 transition-colors cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />
-                            <span>Xem các đoạn (OCR)</span>
+                            <span>Xem các đoạn</span>
                           </button>
                           <button
                             onClick={() => handleDeleteDoc(activePrimary.id)}
@@ -993,6 +1096,34 @@ export const TeacherDashboard: React.FC = () => {
                           <div key={p.id} className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
                             <span className="text-slate-700 truncate">{p.title} (v{p.version})</span>
                             <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={() => handleDownloadDoc(p.id, p.file_name)}
+                                title="Tải văn bản về máy"
+                                className="text-[11px] text-slate-600 hover:text-slate-900 flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Tải về</span>
+                              </button>
+                              <label
+                                title="Tải lại / Cập nhật file .txt hoặc .md mới"
+                                className="text-[11px] text-slate-600 hover:text-slate-900 flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <Upload className="w-3 h-3" />
+                                <span>{isReuploadingDocId === p.id ? 'Đang tải...' : 'Tải lại'}</span>
+                                <input
+                                  type="file"
+                                  accept=".txt,.md"
+                                  className="hidden"
+                                  disabled={isReuploadingDocId === p.id}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) {
+                                      handleReuploadDoc(p.id, f);
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                />
+                              </label>
                               <button
                                 onClick={() => handleViewParagraphs(p)}
                                 className="text-[11px] text-slate-600 hover:text-slate-900 underline cursor-pointer"
@@ -1054,6 +1185,38 @@ export const TeacherDashboard: React.FC = () => {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => handleDownloadDoc(d.id, d.file_name)}
+                              title="Tải văn bản về máy (.txt / .md)"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium cursor-pointer transition-colors"
+                            >
+                              <Download className="w-3 h-3 text-slate-600" />
+                              <span>Tải về</span>
+                            </button>
+                            <label
+                              title="Tải lại / Thay thế tệp .txt hoặc .md mới cho tài liệu này"
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer transition-colors ${
+                                isReuploadingDocId === d.id
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              <Upload className="w-3 h-3 text-slate-600" />
+                              <span>{isReuploadingDocId === d.id ? 'Đang cập nhật...' : 'Tải lại tệp'}</span>
+                              <input
+                                type="file"
+                                accept=".txt,.md"
+                                className="hidden"
+                                disabled={isReuploadingDocId === d.id}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) {
+                                    handleReuploadDoc(d.id, f);
+                                    e.target.value = '';
+                                  }
+                                }}
+                              />
+                            </label>
                             <button
                               onClick={() => handleViewParagraphs(d)}
                               title="Xem các đoạn trích xuất"
@@ -1125,6 +1288,38 @@ export const TeacherDashboard: React.FC = () => {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => handleDownloadDoc(d.id, d.file_name)}
+                              title="Tải văn bản về máy (.txt / .md)"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium cursor-pointer transition-colors"
+                            >
+                              <Download className="w-3 h-3 text-slate-600" />
+                              <span>Tải về</span>
+                            </button>
+                            <label
+                              title="Tải lại / Thay thế tệp .txt hoặc .md mới cho tài liệu này"
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer transition-colors ${
+                                isReuploadingDocId === d.id
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              <Upload className="w-3 h-3 text-slate-600" />
+                              <span>{isReuploadingDocId === d.id ? 'Đang cập nhật...' : 'Tải lại tệp'}</span>
+                              <input
+                                type="file"
+                                accept=".txt,.md"
+                                className="hidden"
+                                disabled={isReuploadingDocId === d.id}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) {
+                                    handleReuploadDoc(d.id, f);
+                                    e.target.value = '';
+                                  }
+                                }}
+                              />
+                            </label>
                             <button
                               onClick={() => handleUpdateClassification(d.id, 'reference', 'analysis')}
                               className="px-2.5 py-1 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-[11px] font-semibold cursor-pointer shadow-2xs"

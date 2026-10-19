@@ -40,28 +40,29 @@ export interface DocumentRow {
 export class DocumentService {
   /**
    * Allowed MIME types and extensions for RAG documents
+   * STRICT: Only text/plain (.txt) and text/markdown (.md) are supported for 100% accurate quotes.
    */
   static readonly ALLOWED_MIME_TYPES = [
     'text/plain',
     'text/markdown',
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'text/csv',
   ];
 
   static readonly MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
   /**
-   * Validates uploaded file
+   * Validates uploaded file - strictly enforces .txt or .md
    */
   static validateFile(file: { mimetype: string; size: number; originalname: string }): { valid: boolean; error?: string } {
     if (file.size > this.MAX_FILE_SIZE) {
       return { valid: false, error: 'Dung lượng file vượt quá giới hạn 50MB.' };
     }
     const ext = file.originalname.split('.').pop()?.toLowerCase();
-    const isAllowedExt = ['txt', 'md', 'pdf', 'docx', 'csv'].includes(ext ?? '');
-    if (!this.ALLOWED_MIME_TYPES.includes(file.mimetype) && !isAllowedExt) {
-      return { valid: false, error: 'Định dạng file không được hỗ trợ. Chỉ chấp nhận TXT, MD, PDF, DOCX, CSV.' };
+    const isAllowedExt = ['txt', 'md'].includes(ext ?? '');
+    if (!isAllowedExt) {
+      return {
+        valid: false,
+        error: 'Định dạng file không được hỗ trợ. Hệ thống yêu cầu tệp nội dung bắt buộc là định dạng .txt hoặc .md (UTF-8).',
+      };
     }
     return { valid: true };
   }
@@ -369,6 +370,99 @@ export class DocumentService {
    */
   static async deleteDocument(documentId: string): Promise<void> {
     await query(`DELETE FROM documents WHERE id = $1`, [documentId]);
+  }
+
+  /**
+   * Retrieves document content and metadata for downloading
+   */
+  static async getDocumentForDownload(documentId: string): Promise<DocumentRow> {
+    const res = await query<DocumentRow>(`SELECT * FROM documents WHERE id = $1`, [documentId]);
+    if (res.rows.length === 0) {
+      throw new Error('Tài liệu không tồn tại.');
+    }
+    return res.rows[0];
+  }
+
+  /**
+   * Re-uploads / updates content of an existing document using a new TXT or MD file.
+   * Atomically increments version, updates raw text, and re-slices paragraphs.
+   */
+  static async reuploadDocument(params: {
+    documentId: string;
+    file: { originalname: string; mimetype: string; size: number; buffer: Buffer };
+    userId: string;
+  }): Promise<DocumentRow> {
+    const { documentId, file, userId } = params;
+
+    const val = this.validateFile({
+      mimetype: file.mimetype,
+      size: file.size,
+      originalname: file.originalname,
+    });
+    if (!val.valid) {
+      throw new Error(val.error || 'File không hợp lệ.');
+    }
+
+    const docRes = await query<DocumentRow>(`SELECT * FROM documents WHERE id = $1`, [documentId]);
+    if (docRes.rows.length === 0) {
+      throw new Error('Tài liệu không tồn tại.');
+    }
+    const doc = docRes.rows[0];
+
+    const rawContent = file.buffer.toString('utf-8');
+    const newVersion = (doc.version || 1) + 1;
+
+    await query('BEGIN');
+    try {
+      const updateRes = await query<DocumentRow>(
+        `UPDATE documents
+         SET file_name = $1,
+             file_size_bytes = $2,
+             mime_type = $3,
+             raw_content = $4,
+             version = $5,
+             status = 'ready',
+             ocr_status = 'none',
+             reviewed_by = $6,
+             reviewed_at = NOW()
+         WHERE id = $7
+         RETURNING *`,
+        [file.originalname, file.size, file.mimetype, rawContent, newVersion, userId, documentId]
+      );
+
+      // Re-slice & save paragraphs into work_paragraphs
+      await ParagraphService.extractAndSaveParagraphs({
+        documentId,
+        workId: doc.work_id,
+        version: newVersion,
+        rawText: rawContent,
+      });
+
+      await query('COMMIT');
+
+      // Attempt background re-upload to Gemini File Search Store if store exists
+      try {
+        const storeName = doc.file_search_store_name || `work_${doc.work_id}_store`;
+        const { operationName, geminiFileName } = await GeminiService.uploadToFileSearchStore(
+          storeName,
+          file.buffer,
+          file.originalname,
+          file.mimetype
+        );
+        await query(`UPDATE documents SET gemini_file_name = $1 WHERE id = $2`, [geminiFileName, documentId]);
+        await query(
+          `INSERT INTO indexing_jobs (document_id, operation_name, status) VALUES ($1, $2, 'running')`,
+          [documentId, operationName]
+        );
+      } catch (geminiErr) {
+        console.warn('[DocumentService] Gemini store re-index notice (local RAG still fully intact):', geminiErr);
+      }
+
+      return updateRes.rows[0];
+    } catch (err) {
+      await query('ROLLBACK');
+      throw err;
+    }
   }
 
   /**

@@ -274,4 +274,68 @@ Hình tượng anh thanh niên tiêu biểu cho thế hệ trẻ Việt Nam th�
     expect(ragResult.referenceCitations).toBeDefined();
     expect(ragResult.referenceCitations?.length).toBeGreaterThan(0);
   });
+
+  it('strictly enforces input file format: only accepts .txt or .md, rejects .pdf, .docx, .csv', () => {
+    // Valid cases
+    expect(DocumentService.validateFile({ mimetype: 'text/plain', size: 1000, originalname: 'van_ban.txt' }).valid).toBe(true);
+    expect(DocumentService.validateFile({ mimetype: 'text/markdown', size: 2000, originalname: 'giao_an.md' }).valid).toBe(true);
+
+    // Invalid cases (rejected per user requirement)
+    const pdfRes = DocumentService.validateFile({ mimetype: 'application/pdf', size: 5000, originalname: 'scan.pdf' });
+    expect(pdfRes.valid).toBe(false);
+    expect(pdfRes.error).toContain('.txt hoặc .md');
+
+    const docxRes = DocumentService.validateFile({
+      mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 5000,
+      originalname: 'bai_giang.docx',
+    });
+    expect(docxRes.valid).toBe(false);
+
+    const csvRes = DocumentService.validateFile({ mimetype: 'text/csv', size: 5000, originalname: 'data.csv' });
+    expect(csvRes.valid).toBe(false);
+  });
+
+  it('allows teacher to re-upload / replace document content and re-slice paragraphs', async () => {
+    // 1. Upload a document
+    const uploadRes = await DocumentService.uploadDocument({
+      workId: testWorkId,
+      title: 'Tài liệu cần hiệu chỉnh',
+      docType: 'analysis',
+      documentRole: 'reference',
+      file: {
+        originalname: 'phien_ban_dau.txt',
+        mimetype: 'text/plain',
+        size: 50,
+        buffer: Buffer.from('[Trang 1]\nNội dung ban đầu chưa hoàn thiện.', 'utf-8'),
+      },
+      userId: testUserId,
+    });
+
+    // 2. Re-upload with revised text in markdown format
+    const updatedDoc = await DocumentService.reuploadDocument({
+      documentId: uploadRes.documentId,
+      file: {
+        originalname: 'phien_ban_moi.md',
+        mimetype: 'text/markdown',
+        size: 120,
+        buffer: Buffer.from('# Tiêu đề mới\n\n[Trang 1]\nĐoạn văn sau khi được giáo viên biên tập lại đầy đủ và chuẩn xác.', 'utf-8'),
+      },
+      userId: testUserId,
+    });
+
+    expect(updatedDoc.file_name).toBe('phien_ban_moi.md');
+    expect(updatedDoc.version).toBeGreaterThan(1);
+    expect(updatedDoc.raw_content).toContain('Đoạn văn sau khi được giáo viên biên tập lại');
+
+    // 3. Verify paragraphs are re-sliced
+    const newParagraphs = await ParagraphService.getParagraphsForDocument(uploadRes.documentId);
+    expect(newParagraphs.length).toBeGreaterThan(0);
+    expect(newParagraphs.some((p) => p.content.includes('biên tập lại'))).toBe(true);
+
+    // 4. Test download retrieval
+    const downloadDoc = await DocumentService.getDocumentForDownload(uploadRes.documentId);
+    expect(downloadDoc.raw_content).toBe(updatedDoc.raw_content);
+    expect(downloadDoc.file_name).toBe('phien_ban_moi.md');
+  });
 });
