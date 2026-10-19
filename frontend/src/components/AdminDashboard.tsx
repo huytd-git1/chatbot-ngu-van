@@ -1403,28 +1403,40 @@ export const AdminDashboard: React.FC = () => {
                   </label>
 
                   {/* Suggested Models Pills for Current Preset */}
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                      { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-                      { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
-                      { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
-                      { id: 'anthropic/claude-3-5-haiku', label: 'Claude 3.5 Haiku' },
-                    ].map((sm) => (
-                      <button
-                        key={sm.id}
-                        type="button"
-                        onClick={() => setCustomModelName(sm.id)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-mono transition-all cursor-pointer border ${
-                          customModelName === sm.id
-                            ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-2xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                        }`}
-                      >
-                        {sm.label} <span className="opacity-70 text-[10px]">({sm.id})</span>
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    const activePreset = thirdPartyPresets.find(
+                      (p) => p.id === selectedPresetId || p.baseUrl === customBaseUrl
+                    );
+                    const modelsToShow = activePreset?.suggestedModels?.length
+                      ? activePreset.suggestedModels.map((m) => ({ id: m.id, label: m.name }))
+                      : [
+                          { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+                          { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+                          { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+                          { id: 'google/gemini-2.5-flash', label: 'Google/Gemini 2.5' },
+                          { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+                          { id: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' },
+                          { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
+                        ];
+                    return (
+                      <div className="flex flex-wrap gap-2">
+                        {modelsToShow.map((sm) => (
+                          <button
+                            key={sm.id}
+                            type="button"
+                            onClick={() => setCustomModelName(sm.id)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-mono transition-all cursor-pointer border ${
+                              customModelName === sm.id
+                                ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-2xs'
+                                : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
+                            }`}
+                          >
+                            {sm.label} <span className="opacity-70 text-[10px]">({sm.id})</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   <div className="pt-1">
                     <input

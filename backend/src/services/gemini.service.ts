@@ -124,12 +124,27 @@ export class GeminiService {
 
   public static readonly THIRD_PARTY_PRESETS: ThirdPartyPreset[] = [
     {
+      id: 'revidapi',
+      name: 'RevidAPI (revidapi.com - Tốc độ cao)',
+      baseUrl: 'https://revidapi.com/v1',
+      suggestedModels: [
+        { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Khuyên dùng)' },
+        { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
+        { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' },
+      ],
+      description: 'Cổng AI API tốc độ cao revidapi.com hỗ trợ Gemini 3.6/3.5/2.5 Flash, Claude, OpenAI',
+    },
+    {
       id: 'routeapi',
       name: 'RouteAPI (Hợp nhất AI Gateway - Khuyên dùng)',
       baseUrl: 'https://api.routeapi.ai/v1',
       suggestedModels: [
-        { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-        { id: 'google/gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
+        { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Kênh chuẩn)' },
+        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'google/gemini-2.5-flash', name: 'Google/Gemini 2.5 Flash' },
+        { id: 'google/gemini-1.5-flash', name: 'Google/Gemini 1.5 Flash' },
         { id: 'anthropic/claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' },
         { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
         { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
@@ -163,6 +178,8 @@ export class GeminiService {
       name: 'Tùy chỉnh (OneAPI / NewAPI / Local Proxy)',
       baseUrl: 'http://localhost:3000/v1',
       suggestedModels: [
+        { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+        { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
         { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
         { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
       ],
@@ -986,7 +1003,59 @@ export class GeminiService {
   }
 
   /**
-   * Tests connection for third party OpenAI-compatible endpoints (RouteAPI, OpenRouter, etc.)
+   * Helper to resolve model candidates across different third-party gateway naming conventions.
+   * For example:
+   *  "google/gemini-3.5-flash" -> ["google/gemini-3.5-flash", "gemini-3.5-flash"]
+   *  "gemini-3.6-flash" -> ["gemini-3.6-flash", "google/gemini-3.6-flash"]
+   *  "openai/gpt-4o-mini" -> ["openai/gpt-4o-mini", "gpt-4o-mini"]
+   *  "gpt-4o-mini" -> ["gpt-4o-mini", "openai/gpt-4o-mini"]
+   */
+  public static getCandidateModelNames(rawModel: string): string[] {
+    const trimmed = (rawModel || '').trim();
+    if (!trimmed) return ['gemini-2.5-flash', 'google/gemini-2.5-flash'];
+
+    const candidates: string[] = [trimmed];
+    if (trimmed.includes('/')) {
+      const parts = trimmed.split('/');
+      const stripped = parts[parts.length - 1]?.trim();
+      if (stripped && !candidates.includes(stripped)) {
+        candidates.push(stripped);
+      }
+    } else {
+      if (trimmed.startsWith('gemini')) {
+        candidates.push(`google/${trimmed}`);
+      } else if (trimmed.startsWith('gpt')) {
+        candidates.push(`openai/${trimmed}`);
+      } else if (trimmed.startsWith('claude')) {
+        candidates.push(`anthropic/${trimmed}`);
+      } else if (trimmed.startsWith('deepseek')) {
+        candidates.push(`deepseek/${trimmed}`);
+      }
+    }
+    return candidates;
+  }
+
+  /**
+   * Checks if an error status or message indicates model access denied, not found, or unsupported format
+   */
+  public static isModelAccessOrNotFoundError(status: number, errText: string): boolean {
+    if (status === 404) return true;
+    const lower = (errText || '').toLowerCase();
+    return (
+      lower.includes('no access to model') ||
+      lower.includes('model_not_found') ||
+      lower.includes('không bán model') ||
+      lower.includes('does not exist') ||
+      lower.includes('unknown model') ||
+      lower.includes('invalid model') ||
+      lower.includes('model not found') ||
+      (status === 403 && lower.includes('model')) ||
+      (status === 400 && lower.includes('model'))
+    );
+  }
+
+  /**
+   * Tests connection for third party OpenAI-compatible endpoints (RouteAPI, RevidAPI, OpenRouter, etc.)
    */
   public static async testThirdPartyConnection(params: {
     baseUrl: string;
@@ -1012,89 +1081,123 @@ export class GeminiService {
 
     const results: KeyTestResult[] = [];
     let workingKeys = 0;
+    let finalAdaptedModel = model;
     const overallStartTime = Date.now();
+    const candidateModels = this.getCandidateModelNames(model);
 
     for (let idx = 0; idx < keys.length; idx++) {
       const key = keys[idx];
       const masked = this.maskKey(key);
       const keyStartTime = Date.now();
 
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
+      let keySuccess = false;
+      let lastErrResult: any = null;
 
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${key.trim()}`,
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [
-              {
-                role: 'user',
-                content: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
-              },
-            ],
-            max_tokens: 60,
-            temperature: 0.7,
-          }),
-          signal: controller.signal,
-        });
+      for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
+        const currentModel = candidateModels[mIdx];
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-        clearTimeout(timeoutId);
-        const responseTimeMs = Date.now() - keyStartTime;
-
-        if (response.ok) {
-          const data = (await response.json()) as any;
-          const replyText =
-            data.choices?.[0]?.message?.content ||
-            data.choices?.[0]?.text ||
-            'Kết nối thành công.';
-          workingKeys++;
-
-          results.push({
-            index: idx + 1,
-            maskedKey: masked,
-            success: true,
-            modelUsed: model,
-            responseTimeMs,
-            message: `Sẵn sàng (${responseTimeMs}ms): "${replyText.trim().substring(0, 80)}"`,
-            status: 'ready',
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${key.trim()}`,
+              'x-api-key': key.trim(),
+            },
+            body: JSON.stringify({
+              model: currentModel,
+              messages: [
+                {
+                  role: 'user',
+                  content: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
+                },
+              ],
+              max_tokens: 60,
+              temperature: 0.7,
+            }),
+            signal: controller.signal,
           });
-        } else {
-          const errBody = await response.text().catch(() => '');
-          let status: 'quota_exceeded' | 'unavailable' | 'error' = 'error';
-          if (response.status === 429) {
-            status = 'quota_exceeded';
-          } else if (response.status === 503 || response.status === 502 || response.status === 504) {
-            status = 'unavailable';
-          }
 
-          results.push({
+          clearTimeout(timeoutId);
+          const responseTimeMs = Date.now() - keyStartTime;
+
+          if (response.ok) {
+            const data = (await response.json()) as any;
+            const replyText =
+              data.choices?.[0]?.message?.content ||
+              data.choices?.[0]?.text ||
+              'Kết nối thành công.';
+            workingKeys++;
+            keySuccess = true;
+            finalAdaptedModel = currentModel;
+
+            const adaptedNotice =
+              currentModel !== model
+                ? ` [Tự động thích ứng tên mô hình: ${currentModel}]`
+                : '';
+
+            results.push({
+              index: idx + 1,
+              maskedKey: masked,
+              success: true,
+              modelUsed: currentModel,
+              responseTimeMs,
+              message: `Sẵn sàng (${responseTimeMs}ms)${adaptedNotice}: "${replyText.trim().substring(0, 80)}"`,
+              status: 'ready',
+            });
+            break;
+          } else {
+            const errBody = await response.text().catch(() => '');
+            let status: 'quota_exceeded' | 'unavailable' | 'error' = 'error';
+            if (response.status === 429) {
+              status = 'quota_exceeded';
+            } else if (response.status === 503 || response.status === 502 || response.status === 504) {
+              status = 'unavailable';
+            }
+
+            lastErrResult = {
+              index: idx + 1,
+              maskedKey: masked,
+              success: false,
+              modelUsed: currentModel,
+              responseTimeMs,
+              message: `Lỗi HTTP ${response.status}: ${errBody.substring(0, 150) || response.statusText}`,
+              error: errBody || response.statusText,
+              status,
+            };
+
+            // If model is denied access or not found, try the next candidate model
+            if (
+              this.isModelAccessOrNotFoundError(response.status, errBody) &&
+              mIdx < candidateModels.length - 1
+            ) {
+              console.warn(
+                `[GeminiService] Model "${currentModel}" failed (${response.status}), retrying candidate "${candidateModels[mIdx + 1]}"...`
+              );
+              continue;
+            }
+            break;
+          }
+        } catch (err: any) {
+          const responseTimeMs = Date.now() - keyStartTime;
+          lastErrResult = {
             index: idx + 1,
             maskedKey: masked,
             success: false,
-            modelUsed: model,
+            modelUsed: currentModel,
             responseTimeMs,
-            message: `Lỗi HTTP ${response.status}: ${errBody.substring(0, 120) || response.statusText}`,
-            error: errBody || response.statusText,
-            status,
-          });
+            message: `Lỗi kết nối: ${err.message || 'Không phản hồi'}`,
+            error: err.message,
+            status: 'error',
+          };
+          break;
         }
-      } catch (err: any) {
-        const responseTimeMs = Date.now() - keyStartTime;
-        results.push({
-          index: idx + 1,
-          maskedKey: masked,
-          success: false,
-          modelUsed: model,
-          responseTimeMs,
-          message: `Lỗi kết nối: ${err.message || 'Không phản hồi'}`,
-          error: err.message,
-          status: 'error',
-        });
+      }
+
+      if (!keySuccess && lastErrResult) {
+        results.push(lastErrResult);
       }
     }
 
@@ -1103,9 +1206,13 @@ export class GeminiService {
 
     let summaryMessage = '';
     if (workingKeys === keys.length) {
-      summaryMessage = `Tất cả ${workingKeys}/${keys.length} API Token bên thứ ba (${cleanBaseUrl}) đều hoạt động xuất sắc với mô hình ${model}!`;
+      const adaptedNote =
+        finalAdaptedModel !== model
+          ? ` (Đã tự động tương thích mô hình: ${finalAdaptedModel})`
+          : '';
+      summaryMessage = `Tất cả ${workingKeys}/${keys.length} API Token bên thứ ba (${cleanBaseUrl}) đều hoạt động xuất sắc với mô hình ${finalAdaptedModel}!${adaptedNote}`;
     } else if (workingKeys > 0) {
-      summaryMessage = `Đã xác thực thành công ${workingKeys}/${keys.length} API Token bên thứ ba.`;
+      summaryMessage = `Đã xác thực thành công ${workingKeys}/${keys.length} API Token bên thứ ba (mô hình: ${finalAdaptedModel}).`;
     } else {
       summaryMessage = `Toàn bộ ${keys.length} API Token bên thứ ba đều không thể kết nối tới ${cleanBaseUrl}. Vui lòng kiểm tra lại Token hoặc Base URL.`;
     }
@@ -1113,7 +1220,7 @@ export class GeminiService {
     return {
       success: isOverallSuccess,
       message: summaryMessage,
-      modelUsed: model,
+      modelUsed: finalAdaptedModel,
       totalKeys: keys.length,
       workingKeys,
       responseTimeMs: Math.round(overallResponseTimeMs / keys.length),
@@ -1122,7 +1229,7 @@ export class GeminiService {
   }
 
   /**
-   * Calls Third-Party Chat Completions (RouteAPI, OpenRouter, etc.)
+   * Calls Third-Party Chat Completions (RouteAPI, RevidAPI, OpenRouter, etc.)
    */
   public static async callThirdPartyChatCompletions(params: {
     systemInstruction?: string;
@@ -1147,82 +1254,108 @@ export class GeminiService {
       ? cleanBaseUrl
       : `${cleanBaseUrl}/chat/completions`;
 
-    const modelToUse = this.customModelName.trim() || 'google/gemini-2.5-flash';
+    const candidateModels = this.getCandidateModelNames(this.customModelName.trim() || 'gemini-2.5-flash');
     let lastError: any = null;
 
     for (let i = 0; i < candidateKeys.length; i++) {
       const currentKey = candidateKeys[i];
-      try {
-        await this.throttleRequest();
 
-        const messages: Array<{ role: string; content: string }> = [];
-        if (systemInstruction && systemInstruction.trim()) {
-          messages.push({ role: 'system', content: systemInstruction.trim() });
-        }
-        messages.push({ role: 'user', content: groundingPrompt });
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000);
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${currentKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: modelToUse,
-            messages,
-            temperature: 0.7,
-          }),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errText = await response.text().catch(() => '');
-          if (response.status === 429) {
-            this.markThirdPartyKeyCooldown(currentKey, 60000);
-          }
-          throw new Error(`HTTP ${response.status} from ${cleanBaseUrl}: ${errText.substring(0, 150)}`);
-        }
-
-        const data = (await response.json()) as any;
-        const text = data.choices?.[0]?.message?.content || '';
-        const pTokens = data.usage?.prompt_tokens ?? Math.ceil(groundingPrompt.length / 4);
-        const oTokens = data.usage?.completion_tokens ?? Math.ceil(text.length / 4);
-        const totalTokens = data.usage?.total_tokens ?? (pTokens + oTokens);
-
-        await this.recordKeyUsage({
-          key: currentKey,
-          promptTokens: pTokens,
-          outputTokens: oTokens,
-          success: true,
-        });
-
-        let hostName = 'gateway';
+      for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
+        const modelToUse = candidateModels[mIdx];
         try {
-          hostName = new URL(cleanBaseUrl).hostname;
-        } catch {}
+          await this.throttleRequest();
 
-        return {
-          text,
-          tokenCount: totalTokens,
-          promptTokens: pTokens,
-          outputTokens: oTokens,
-          modelUsed: `${modelToUse} (${hostName})`,
-          apiKeyMasked: this.maskKey(currentKey),
-        };
-      } catch (err: any) {
-        lastError = err;
-        await this.recordKeyUsage({
-          key: currentKey,
-          promptTokens: 0,
-          outputTokens: 0,
-          success: false,
-        });
-        console.warn(`[GeminiService] ThirdParty key error:`, err.message);
+          const messages: Array<{ role: string; content: string }> = [];
+          if (systemInstruction && systemInstruction.trim()) {
+            messages.push({ role: 'system', content: systemInstruction.trim() });
+          }
+          messages.push({ role: 'user', content: groundingPrompt });
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${currentKey.trim()}`,
+              'x-api-key': currentKey.trim(),
+            },
+            body: JSON.stringify({
+              model: modelToUse,
+              messages,
+              temperature: 0.7,
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            if (response.status === 429) {
+              this.markThirdPartyKeyCooldown(currentKey, 60000);
+            }
+
+            if (
+              this.isModelAccessOrNotFoundError(response.status, errText) &&
+              mIdx < candidateModels.length - 1
+            ) {
+              console.warn(
+                `[GeminiService] Model "${modelToUse}" rejected (${response.status}), retrying with candidate "${candidateModels[mIdx + 1]}"...`
+              );
+              continue;
+            }
+
+            throw new Error(`HTTP ${response.status} from ${cleanBaseUrl}: ${errText.substring(0, 150)}`);
+          }
+
+          const data = (await response.json()) as any;
+          const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+          if (!text || !text.trim()) {
+            throw new Error('Cổng phản hồi rỗng không chứa nội dung.');
+          }
+
+          // Automatically remember the working model format if fallback was needed
+          if (modelToUse !== this.customModelName) {
+            this.customModelName = modelToUse;
+          }
+
+          const pTokens = data.usage?.prompt_tokens ?? Math.ceil(groundingPrompt.length / 4);
+          const oTokens = data.usage?.completion_tokens ?? Math.ceil(text.length / 4);
+          const totalTokens = data.usage?.total_tokens ?? (pTokens + oTokens);
+
+          await this.recordKeyUsage({
+            key: currentKey,
+            promptTokens: pTokens,
+            outputTokens: oTokens,
+            success: true,
+          });
+
+          let hostName = 'gateway';
+          try {
+            hostName = new URL(cleanBaseUrl).hostname;
+          } catch {}
+
+          return {
+            text,
+            tokenCount: totalTokens,
+            promptTokens: pTokens,
+            outputTokens: oTokens,
+            modelUsed: `${modelToUse} (${hostName})`,
+            apiKeyMasked: this.maskKey(currentKey),
+          };
+        } catch (err: any) {
+          lastError = err;
+          await this.recordKeyUsage({
+            key: currentKey,
+            promptTokens: 0,
+            outputTokens: 0,
+            success: false,
+          });
+          console.warn(`[GeminiService] ThirdParty key error:`, err.message);
+          break; // Move to next key
+        }
       }
     }
 

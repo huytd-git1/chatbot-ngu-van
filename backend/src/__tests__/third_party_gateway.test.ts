@@ -7,9 +7,15 @@ describe('Third-Party API Gateway (RouteAPI / OpenRouter / Custom)', () => {
     await runMigrations();
   });
 
-  it('provides default third-party presets including RouteAPI and OpenRouter', () => {
+  it('provides default third-party presets including RevidAPI, RouteAPI, and OpenRouter', () => {
     const presets = GeminiService.getThirdPartyPresets();
-    expect(presets).toHaveLength(4);
+    expect(presets.length).toBeGreaterThanOrEqual(5);
+
+    const revidApi = presets.find((p) => p.id === 'revidapi');
+    expect(revidApi).toBeDefined();
+    expect(revidApi?.baseUrl).toBe('https://revidapi.com/v1');
+    expect(revidApi?.suggestedModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
+
     const routeApi = presets.find((p) => p.id === 'routeapi');
     expect(routeApi).toBeDefined();
     expect(routeApi?.baseUrl).toBe('https://api.routeapi.ai/v1');
@@ -18,6 +24,31 @@ describe('Third-Party API Gateway (RouteAPI / OpenRouter / Custom)', () => {
     const openRouter = presets.find((p) => p.id === 'openrouter');
     expect(openRouter).toBeDefined();
     expect(openRouter?.baseUrl).toBe('https://openrouter.ai/api/v1');
+  });
+
+  it('normalizes model candidates across prefix formats', () => {
+    // google/gemini-3.5-flash -> fallback to gemini-3.5-flash
+    const c1 = GeminiService.getCandidateModelNames('google/gemini-3.5-flash');
+    expect(c1).toEqual(['google/gemini-3.5-flash', 'gemini-3.5-flash']);
+
+    // gemini-3.6-flash -> fallback to google/gemini-3.6-flash
+    const c2 = GeminiService.getCandidateModelNames('gemini-3.6-flash');
+    expect(c2).toEqual(['gemini-3.6-flash', 'google/gemini-3.6-flash']);
+
+    // openai/gpt-4o-mini -> fallback to gpt-4o-mini
+    const c3 = GeminiService.getCandidateModelNames('openai/gpt-4o-mini');
+    expect(c3).toEqual(['openai/gpt-4o-mini', 'gpt-4o-mini']);
+
+    // gpt-4o-mini -> fallback to openai/gpt-4o-mini
+    const c4 = GeminiService.getCandidateModelNames('gpt-4o-mini');
+    expect(c4).toEqual(['gpt-4o-mini', 'openai/gpt-4o-mini']);
+  });
+
+  it('detects model access or not found error signals', () => {
+    expect(GeminiService.isModelAccessOrNotFoundError(403, 'This token has no access to model google/gemini-3.5-flash')).toBe(true);
+    expect(GeminiService.isModelAccessOrNotFoundError(400, "Không bán model 'google/gemini-3.6-flash'")).toBe(true);
+    expect(GeminiService.isModelAccessOrNotFoundError(404, 'Not found')).toBe(true);
+    expect(GeminiService.isModelAccessOrNotFoundError(429, 'Rate limit exceeded')).toBe(false);
   });
 
   it('updates AI config with third_party provider and multiple tokens pool', async () => {
