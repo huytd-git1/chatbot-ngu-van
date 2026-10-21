@@ -63,6 +63,7 @@ export const AdminDashboard: React.FC = () => {
   const [customKeyPool, setCustomKeyPool] = useState<KeyPoolItem[]>([]);
   const [thirdPartyPresets, setThirdPartyPresets] = useState<ThirdPartyPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState('routeapi');
+  const [updatingKeyModel, setUpdatingKeyModel] = useState<string | null>(null);
 
   const [isLiveAiConfigured, setIsLiveAiConfigured] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
@@ -434,6 +435,31 @@ export const AdminDashboard: React.FC = () => {
       loadSettings();
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleUpdateKeyModel = async (
+    provider: 'google_official' | 'third_party',
+    index: number,
+    model: string
+  ) => {
+    const keyId = `${provider}_${index}`;
+    setUpdatingKeyModel(keyId);
+    try {
+      const res = await apiRequest('/api/admin/ai-settings/key-model', {
+        method: 'PUT',
+        body: JSON.stringify({ provider, index, model }),
+      });
+      if (res.config) {
+        if (res.config.keyPool) setKeyPool(res.config.keyPool);
+        if (res.config.customKeyPool) setCustomKeyPool(res.config.customKeyPool);
+      } else {
+        await loadAiSettings();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Không thể cập nhật mô hình cho Key.');
+    } finally {
+      setUpdatingKeyModel(null);
     }
   };
 
@@ -1281,6 +1307,51 @@ export const AdminDashboard: React.FC = () => {
                               </div>
                             </div>
 
+                            {/* Per-Key Model Selector */}
+                            <div className="flex items-center gap-1.5 bg-indigo-50/80 rounded-xl px-2.5 py-1.5 border border-indigo-100/90 text-[11px]">
+                              <Cpu className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              <span className="text-[10px] font-bold text-indigo-900 shrink-0">Mô hình:</span>
+                              <select
+                                value={k.model || customModelName}
+                                onChange={(e) => handleUpdateKeyModel('third_party', k.index, e.target.value)}
+                                disabled={updatingKeyModel === `third_party_${k.index}`}
+                                title={`Chọn mô hình hoạt động riêng cho Token #${k.index}`}
+                                className="flex-1 bg-white text-indigo-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-indigo-200/90 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
+                              >
+                                <option value={customModelName}>Mặc định ({customModelName})</option>
+                                {thirdPartyPresets
+                                  .find((p) => p.id === selectedPresetId)
+                                  ?.suggestedModels?.map((sm) => (
+                                    <option key={sm.id} value={sm.id}>
+                                      {sm.name}
+                                    </option>
+                                  ))}
+                                <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                <option value="google/gemini-2.5-flash">google/gemini-2.5-flash</option>
+                                <option value="deepseek/deepseek-chat">deepseek/deepseek-chat</option>
+                                <option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>
+                                <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
+                                {k.model &&
+                                  ![
+                                    customModelName,
+                                    'gemini-3.6-flash',
+                                    'gemini-3.5-flash',
+                                    'gemini-2.5-flash',
+                                    'google/gemini-2.5-flash',
+                                    'deepseek/deepseek-chat',
+                                    'openai/gpt-4o-mini',
+                                    'claude-3-5-sonnet',
+                                  ].includes(k.model) && (
+                                    <option value={k.model}>{k.model} (Hiện tại)</option>
+                                  )}
+                              </select>
+                              {updatingKeyModel === `third_party_${k.index}` && (
+                                <RefreshCw className="w-3 h-3 text-indigo-600 animate-spin shrink-0" />
+                              )}
+                            </div>
+
                             {/* Token Consumption */}
                             <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[11px]">
                               <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100 space-y-0.5">
@@ -1523,6 +1594,34 @@ export const AdminDashboard: React.FC = () => {
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
+                            </div>
+
+                            {/* Per-Key Model Selector */}
+                            <div className="flex items-center gap-1.5 bg-emerald-50/80 rounded-xl px-2.5 py-1.5 border border-emerald-100/90 text-[11px]">
+                              <Cpu className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="text-[10px] font-bold text-emerald-900 shrink-0">Mô hình:</span>
+                              <select
+                                value={k.model || selectedModel}
+                                onChange={(e) => handleUpdateKeyModel('google_official', k.index, e.target.value)}
+                                disabled={updatingKeyModel === `google_official_${k.index}`}
+                                title={`Chọn mô hình hoạt động riêng cho API Key #${k.index}`}
+                                className="flex-1 bg-white text-emerald-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-emerald-200/90 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
+                              >
+                                <option value={selectedModel}>Mặc định ({selectedModel})</option>
+                                {supportedModels.map((sm) => (
+                                  <option key={sm.id} value={sm.id}>
+                                    {sm.name} {sm.badge ? `(${sm.badge})` : ''}
+                                  </option>
+                                ))}
+                                {k.model &&
+                                  !supportedModels.some((sm) => sm.id === k.model) &&
+                                  k.model !== selectedModel && (
+                                    <option value={k.model}>{k.model} (Hiện tại)</option>
+                                  )}
+                              </select>
+                              {updatingKeyModel === `google_official_${k.index}` && (
+                                <RefreshCw className="w-3 h-3 text-emerald-600 animate-spin shrink-0" />
+                              )}
                             </div>
 
                             {/* Token Consumption & Usage Stats for this Key */}

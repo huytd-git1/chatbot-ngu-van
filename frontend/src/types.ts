@@ -174,6 +174,7 @@ export interface KeyPoolItem {
   errorCount: number;
   lastUsedAt: string | null;
   percentShare: number;
+  model?: string;
 }
 
 export interface ThirdPartyPreset {

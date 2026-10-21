@@ -296,6 +296,7 @@ export async function runMigrations() {
     ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_base_url VARCHAR(255) DEFAULT 'https://api.routeapi.ai/v1';
     ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_api_key TEXT;
     ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_model_name VARCHAR(100) DEFAULT 'google/gemini-2.5-flash';
+    ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS key_models TEXT DEFAULT '{}';
     `
   ];
 

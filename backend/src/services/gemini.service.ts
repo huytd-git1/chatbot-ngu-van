@@ -63,6 +63,7 @@ export interface KeyHealthStatus {
   errorCount: number;
   lastUsedAt: string | null;
   percentShare: number;
+  model?: string;
 }
 
 export interface TokenStatsSummary {
@@ -113,6 +114,7 @@ export class GeminiService {
   private static clientsCache: Map<string, GoogleGenAI> = new Map();
   private static activeModel: string = env.GEMINI_MODEL || 'gemini-3.8-flash';
   private static activeEmbeddingModel: string = env.GEMINI_EMBEDDING_MODEL || 'models/gemini-embedding-2';
+  private static activeKeyModels: Map<string, string> = new Map(); // key or keyHash -> modelName
 
   // Third-Party / OpenAI-Compatible Gateway properties
   private static providerType: 'google_official' | 'third_party' = 'google_official';
@@ -121,6 +123,7 @@ export class GeminiService {
   private static customModelName: string = 'google/gemini-2.5-flash';
   private static customRoundRobinIndex: number = 0;
   private static customKeyCooldowns: Map<string, number> = new Map();
+  private static customKeyModels: Map<string, string> = new Map(); // key or keyHash -> modelName
 
   public static readonly THIRD_PARTY_PRESETS: ThirdPartyPreset[] = [
     {
@@ -234,13 +237,38 @@ export class GeminiService {
 
   /**
    * Parse single string with multiple keys separated by newlines, commas, or semicolons
+   * Supports format KEY or KEY|MODEL (extracting only the KEY portion)
    */
   public static parseKeys(input?: string | null): string[] {
     if (!input) return [];
     return input
       .split(/[\n,;\r]+/)
       .map((k) => k.trim())
-      .filter((k) => k.length > 0 && !k.startsWith('#'));
+      .filter((k) => k.length > 0 && !k.startsWith('#'))
+      .map((k) => {
+        if (k.includes('|')) return k.split('|')[0].trim();
+        return k;
+      })
+      .filter((k) => k.length > 0);
+  }
+
+  /**
+   * Parses keys along with optional model configuration (e.g., KEY|model-name)
+   */
+  public static parseKeysWithModels(input?: string | null): Array<{ key: string; model?: string }> {
+    if (!input) return [];
+    return input
+      .split(/[\n,;\r]+/)
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0 && !k.startsWith('#'))
+      .map((line) => {
+        if (line.includes('|')) {
+          const parts = line.split('|');
+          return { key: parts[0].trim(), model: parts[1]?.trim() || undefined };
+        }
+        return { key: line };
+      })
+      .filter((item) => item.key.length > 0);
   }
 
   /**
@@ -250,6 +278,104 @@ export class GeminiService {
     if (!key) return '';
     if (key.length <= 8) return '***';
     return `${key.substring(0, 6)}...${key.slice(-4)}`;
+  }
+
+  /**
+   * Gets the assigned model for a specific key, or falls back to provider default model
+   */
+  public static getModelForKey(
+    key: string,
+    provider: 'google_official' | 'third_party' = 'google_official'
+  ): string {
+    const hash = this.hashKey(key);
+    if (provider === 'third_party') {
+      return (
+        this.customKeyModels.get(key) ||
+        this.customKeyModels.get(hash) ||
+        this.customModelName?.trim() ||
+        'google/gemini-2.5-flash'
+      );
+    }
+    return (
+      this.activeKeyModels.get(key) ||
+      this.activeKeyModels.get(hash) ||
+      this.activeModel?.trim() ||
+      'gemini-3.8-flash'
+    );
+  }
+
+  /**
+   * Persists the per-key model configurations to database
+   */
+  public static async persistKeyModels(): Promise<void> {
+    const googleMap: Record<string, string> = {};
+    for (const key of this.activeApiKeys) {
+      const m = this.activeKeyModels.get(key) || this.activeKeyModels.get(this.hashKey(key));
+      if (m) {
+        googleMap[this.hashKey(key)] = m;
+      }
+    }
+
+    const thirdPartyMap: Record<string, string> = {};
+    for (const key of this.customApiKeys) {
+      const m = this.customKeyModels.get(key) || this.customKeyModels.get(this.hashKey(key));
+      if (m) {
+        thirdPartyMap[this.hashKey(key)] = m;
+      }
+    }
+
+    const serialized = JSON.stringify({
+      google: googleMap,
+      third_party: thirdPartyMap,
+    });
+
+    try {
+      await query(
+        `INSERT INTO ai_settings (id, key_models, updated_at)
+         VALUES ('default', $1, NOW())
+         ON CONFLICT (id) DO UPDATE
+         SET key_models = $1,
+             updated_at = NOW()`,
+        [serialized]
+      );
+    } catch (err) {
+      console.warn('[GeminiService] Could not persist key_models to database:', err);
+    }
+  }
+
+  /**
+   * Updates or sets the assigned model for a specific key by 1-based index
+   */
+  public static async setKeyModel(params: {
+    provider: 'google_official' | 'third_party';
+    index: number;
+    model: string;
+  }): Promise<void> {
+    const { provider, index, model } = params;
+    const trimmedModel = model?.trim();
+    if (!trimmedModel) {
+      throw new Error('Tên mô hình không được để trống.');
+    }
+
+    if (provider === 'third_party') {
+      if (index < 1 || index > this.customApiKeys.length) {
+        throw new Error(`Chỉ số Token bên thứ 3 không hợp lệ (#${index}).`);
+      }
+      const key = this.customApiKeys[index - 1];
+      const hash = this.hashKey(key);
+      this.customKeyModels.set(key, trimmedModel);
+      this.customKeyModels.set(hash, trimmedModel);
+    } else {
+      if (index < 1 || index > this.activeApiKeys.length) {
+        throw new Error(`Chỉ số API Key không hợp lệ (#${index}).`);
+      }
+      const key = this.activeApiKeys[index - 1];
+      const hash = this.hashKey(key);
+      this.activeKeyModels.set(key, trimmedModel);
+      this.activeKeyModels.set(hash, trimmedModel);
+    }
+
+    await this.persistKeyModels();
   }
 
   /**
@@ -271,7 +397,8 @@ export class GeminiService {
         custom_base_url?: string | null;
         custom_api_key?: string | null;
         custom_model_name?: string | null;
-      }>(`SELECT api_key, model_name, embedding_model, provider_type, custom_base_url, custom_api_key, custom_model_name FROM ai_settings WHERE id = 'default'`);
+        key_models?: string | null;
+      }>(`SELECT api_key, model_name, embedding_model, provider_type, custom_base_url, custom_api_key, custom_model_name, key_models FROM ai_settings WHERE id = 'default'`);
 
       if (rows.length > 0) {
         if (rows[0].api_key && rows[0].api_key.trim() !== '') {
@@ -300,6 +427,29 @@ export class GeminiService {
         }
         if (rows[0].custom_model_name && rows[0].custom_model_name.trim() !== '') {
           this.customModelName = rows[0].custom_model_name.trim();
+        }
+        if (rows[0].key_models) {
+          try {
+            const parsedKm = typeof rows[0].key_models === 'string'
+              ? JSON.parse(rows[0].key_models)
+              : rows[0].key_models;
+            if (parsedKm?.google && typeof parsedKm.google === 'object') {
+              for (const [k, m] of Object.entries(parsedKm.google)) {
+                if (typeof m === 'string') {
+                  this.activeKeyModels.set(k, m);
+                }
+              }
+            }
+            if (parsedKm?.third_party && typeof parsedKm.third_party === 'object') {
+              for (const [k, m] of Object.entries(parsedKm.third_party)) {
+                if (typeof m === 'string') {
+                  this.customKeyModels.set(k, m);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('[GeminiService] Could not parse key_models from DB:', e);
+          }
         }
       }
       this.clientsCache.clear();
@@ -605,6 +755,7 @@ export class GeminiService {
       return {
         index: idx + 1,
         maskedKey: this.maskKey(key),
+        model: this.getModelForKey(key, 'google_official'),
         isCooldown,
         cooldownSecondsLeft,
         totalTokens,
@@ -644,6 +795,7 @@ export class GeminiService {
       return {
         index: idx + 1,
         maskedKey: this.maskKey(key),
+        model: this.getModelForKey(key, 'third_party'),
         isCooldown,
         cooldownSecondsLeft,
         totalTokens,
@@ -744,7 +896,14 @@ export class GeminiService {
       this.customBaseUrl = customBaseUrl.trim();
     }
     if (customApiKey !== undefined && customApiKey.trim() !== '') {
-      const parsedCustom = this.parseKeys(customApiKey);
+      const parsedCustomItems = this.parseKeysWithModels(customApiKey);
+      const parsedCustom = parsedCustomItems.map((p) => p.key);
+      for (const item of parsedCustomItems) {
+        if (item.model) {
+          this.customKeyModels.set(item.key, item.model);
+          this.customKeyModels.set(this.hashKey(item.key), item.model);
+        }
+      }
       if (parsedCustom.length > 0) {
         if (replaceKeys) {
           this.customApiKeys = parsedCustom;
@@ -767,7 +926,14 @@ export class GeminiService {
     }
 
     if (apiKey !== undefined && apiKey.trim() !== '') {
-      const parsedKeys = this.parseKeys(apiKey);
+      const parsedItems = this.parseKeysWithModels(apiKey);
+      const parsedKeys = parsedItems.map((p) => p.key);
+      for (const item of parsedItems) {
+        if (item.model) {
+          this.activeKeyModels.set(item.key, item.model);
+          this.activeKeyModels.set(this.hashKey(item.key), item.model);
+        }
+      }
       if (parsedKeys.length > 0) {
         if (replaceKeys) {
           this.activeApiKeys = parsedKeys;
@@ -821,6 +987,8 @@ export class GeminiService {
         customModelName !== undefined ? customModelName.trim() : null,
       ]
     );
+
+    await this.persistKeyModels();
   }
 
   /**
@@ -837,6 +1005,8 @@ export class GeminiService {
       const removedKey = this.customApiKeys[index - 1];
       this.customApiKeys.splice(index - 1, 1);
       this.customKeyCooldowns.delete(removedKey);
+      this.customKeyModels.delete(removedKey);
+      this.customKeyModels.delete(this.hashKey(removedKey));
       this.customRoundRobinIndex = 0;
 
       const newKeyString = this.customApiKeys.length > 0 ? this.customApiKeys.join('\n') : null;
@@ -849,6 +1019,7 @@ export class GeminiService {
              updated_at = NOW()`,
         [newKeyString]
       );
+      await this.persistKeyModels();
       return;
     }
 
@@ -860,6 +1031,8 @@ export class GeminiService {
     this.activeApiKeys.splice(index - 1, 1);
     this.keyCooldowns.delete(removedKey);
     this.clientsCache.delete(removedKey);
+    this.activeKeyModels.delete(removedKey);
+    this.activeKeyModels.delete(this.hashKey(removedKey));
     this.roundRobinIndex = 0;
 
     const newKeyString = this.activeApiKeys.length > 0 ? this.activeApiKeys.join('\n') : null;
@@ -872,6 +1045,7 @@ export class GeminiService {
            updated_at = NOW()`,
       [newKeyString]
     );
+    await this.persistKeyModels();
   }
 
   /**
@@ -883,6 +1057,7 @@ export class GeminiService {
     if (provider === 'third_party') {
       this.customApiKeys = [];
       this.customKeyCooldowns.clear();
+      this.customKeyModels.clear();
       this.customRoundRobinIndex = 0;
 
       await query(
@@ -892,12 +1067,14 @@ export class GeminiService {
          SET custom_api_key = NULL,
              updated_at = NOW()`
       );
+      await this.persistKeyModels();
       return;
     }
 
     this.activeApiKeys = [];
     this.keyCooldowns.clear();
     this.clientsCache.clear();
+    this.activeKeyModels.clear();
     this.roundRobinIndex = 0;
 
     await query(
@@ -907,6 +1084,7 @@ export class GeminiService {
        SET api_key = NULL,
            updated_at = NOW()`
     );
+    await this.persistKeyModels();
   }
 
   /**
@@ -1118,12 +1296,14 @@ export class GeminiService {
     let workingKeys = 0;
     let finalAdaptedModel = model;
     const overallStartTime = Date.now();
-    const candidateModels = this.getCandidateModelNames(model);
 
     for (let idx = 0; idx < keys.length; idx++) {
       const key = keys[idx];
       const masked = this.maskKey(key);
       const keyStartTime = Date.now();
+      const keyTargetModel = this.getModelForKey(key, 'third_party');
+      const modelToUseForKey = (model && model !== this.customModelName) ? model : keyTargetModel;
+      const candidateModels = this.getCandidateModelNames(modelToUseForKey);
 
       let keySuccess = false;
       let lastErrResult: any = null;
@@ -1289,11 +1469,12 @@ export class GeminiService {
       ? cleanBaseUrl
       : `${cleanBaseUrl}/chat/completions`;
 
-    const candidateModels = this.getCandidateModelNames(this.customModelName.trim() || 'gemini-2.5-flash');
     let lastError: any = null;
 
     for (let i = 0; i < candidateKeys.length; i++) {
       const currentKey = candidateKeys[i];
+      const keyTargetModel = this.getModelForKey(currentKey, 'third_party');
+      const candidateModels = this.getCandidateModelNames(keyTargetModel);
 
       for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
         const modelToUse = candidateModels[mIdx];
@@ -1352,8 +1533,9 @@ export class GeminiService {
           }
 
           // Automatically remember the working model format if fallback was needed
-          if (modelToUse !== this.customModelName) {
-            this.customModelName = modelToUse;
+          if (modelToUse !== keyTargetModel) {
+            this.customKeyModels.set(currentKey, modelToUse);
+            this.customKeyModels.set(this.hashKey(currentKey), modelToUse);
           }
 
           const pTokens = data.usage?.prompt_tokens ?? Math.ceil(groundingPrompt.length / 4);
@@ -1453,11 +1635,15 @@ export class GeminiService {
       const key = keysToTest[idx];
       const masked = this.maskKey(key);
       const keyStartTime = Date.now();
+      const keyModelToUse =
+        customModel && customModel.trim() !== ''
+          ? customModel.trim()
+          : this.getModelForKey(key, 'google_official');
 
       try {
         const testClient = new GoogleGenAI({ apiKey: key });
         const response = await testClient.models.generateContent({
-          model: modelToTest,
+          model: keyModelToUse,
           contents: 'Xin chào, phản hồi ngắn gọn bằng một câu tiếng Việt xác nhận kết nối sẵn sàng.',
         });
 
@@ -1469,7 +1655,7 @@ export class GeminiService {
           index: idx + 1,
           maskedKey: masked,
           success: true,
-          modelUsed: modelToTest,
+          modelUsed: keyModelToUse,
           responseTimeMs,
           message: `Sẵn sàng (${responseTimeMs}ms): "${responseText.trim().substring(0, 80)}"`,
           status: 'ready',
@@ -1489,7 +1675,7 @@ export class GeminiService {
           index: idx + 1,
           maskedKey: masked,
           success: false,
-          modelUsed: modelToTest,
+          modelUsed: keyModelToUse,
           responseTimeMs,
           message: `Lỗi: ${err.message || 'Không thể kết nối'}`,
           error: err.message,
@@ -2046,7 +2232,8 @@ ${formattedHistory}
         let toolActuallyUsed = false;
         let tokenCount = 0;
         let apiSucceeded = false;
-        let actualModelUsed = this.activeModel;
+        const keyTargetModel = this.getModelForKey(currentKey, 'google_official');
+        let actualModelUsed = keyTargetModel;
 
         // Check if store name is a real Google Cloud store
         const hasRealCloudStore =
@@ -2063,7 +2250,7 @@ ${formattedHistory}
             ];
 
             const interaction = await client.interactions.create({
-              model: this.activeModel,
+              model: keyTargetModel,
               input: studentQuestion,
               tools: tools as any,
               systemInstruction,
@@ -2163,11 +2350,11 @@ ${formattedHistory}
    - Xưng "cô", gọi "em". Ấm áp, tận tâm, truyền cảm hứng văn học.
 `;
 
-          // Multi-Tier Model Fallback Cascade (Best Practice: 3.8-flash -> 3.6-flash -> 2.5-flash -> 2.5-flash-lite -> 1.5-flash)
+          // Multi-Tier Model Fallback Cascade (starts from key's designated model)
           const candidateModels = [
-            this.activeModel,
-            'gemini-3.8-flash',
+            keyTargetModel,
             'gemini-3.6-flash',
+            'gemini-3.8-flash',
             'gemini-2.5-flash',
             'gemini-2.5-flash-lite',
             'gemini-1.5-flash',

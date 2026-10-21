@@ -9,7 +9,7 @@
 ## Bảng mục lục hướng dẫn
 1. [Cài đặt và chạy Local (Nhanh nhất)](#1-cài-đặt-và-chạy-local)
 2. [Cấu hình AI: Google Gemini & Cổng Bên Thứ Ba](#2-cấu-hình-ai-google-gemini--cổng-bên-thứ-ba)
-3. [Dàn Multi-Key Pool & Cơ chế Bảo toàn Key (Key Merging)](#3-dàn-multi-key-pool--cơ-chế-bảo-toàn-key-key-merging)
+3. [Dàn Multi-Key Pool & Tùy chọn Mô hình Riêng cho Từng Key](#3-dàn-multi-key-pool--cơ-chế-tùy-chọn-mô-hình-riêng-cho-từng-key)
 4. [Kết nối cơ sở dữ liệu PostgreSQL](#4-kết-nối-cơ-sở-dữ-liệu-postgresql)
 5. [Tạo tài khoản Quản trị viên, Giáo viên và Giáo viên Test](#5-tạo-tài-khoản-quản-trị-viên-giáo-viên-và-giáo-viên-test)
 6. [Nhập danh sách học sinh (Giao diện & File mẫu CSV)](#6-nhập-danh-sách-học-sinh)
@@ -104,11 +104,13 @@ Hỗ trợ bất kỳ cổng OpenAI-compatible nào:
 
 ---
 
-## 3. Dàn Multi-Key Pool & Cơ chế Bảo toàn Key (Key Merging)
+## 3. Dàn Multi-Key Pool & Cơ chế Tùy chọn Mô hình Riêng cho Từng Key
 
-Để triệt tiêu lỗi **429 (Hết hạn mức Quota)** và **503 (Máy chủ quá tải)**:
+Để triệt tiêu lỗi **429 (Hết hạn mức Quota)** và **503 (Máy chủ quá tải)**, đồng thời tối ưu chi phí và hiệu năng:
 - **Dàn nhiều Key / Token**: Hỗ trợ nạp hàng chục key/token cho cả Google Gemini và Bên thứ ba.
-- **Round-Robin Load Balancing**: Luân phiên phân bổ tải đều cho các key.
+- **Tùy chọn mô hình riêng cho từng API Key (Per-Key Model Selection)**: Mỗi API Key / Token có thể được cấu hình một mô hình AI riêng biệt trực tiếp từ giao diện Quản trị (ví dụ: Key 1 chạy `gemini-3.6-flash`, Key 2 chạy `gemini-3.8-flash`, Token thứ ba chạy `deepseek-v4-flash`, `gpt-4o-mini`,...).
+- **Cú pháp dán key nhanh**: Hỗ trợ dán key dạng `KEY` hoặc `KEY|TEN_MO_HINH` (ví dụ: `AIzaSy...|gemini-3.6-flash`).
+- **Round-Robin Load Balancing**: Luân phiên phân bổ tải đều cho các key theo đúng mô hình được gán riêng.
 - **Tự động Cooldown 60s**: Khi một key bị lỗi hạn mức, hệ thống tự động cách ly 60 giây và chuyển sang key dự phòng tiếp theo ngay lập tức mà học sinh không bị gián đoạn.
 - **Bảo toàn dàn Key (Key Merging)**: Khi dán thêm key mới vào hệ thống, các key mới sẽ tự động được bổ sung vào pool hiện có mà **không ghi đè hay xóa các key cũ**. Người quản trị vẫn có thể chủ động bấm xóa từng key theo nhu cầu.
 

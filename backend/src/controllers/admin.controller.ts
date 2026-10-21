@@ -521,6 +521,44 @@ export class AdminController {
   }
 
   /**
+   * Update the model assigned to a specific API key in the pool
+   */
+  static async updateKeyModel(req: Request, res: Response): Promise<void> {
+    const schema = z.object({
+      provider: z.enum(['google_official', 'third_party']).default('google_official'),
+      index: z.number().int().min(1),
+      model: z.string().min(1),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Dữ liệu chỉ định mô hình cho Key không hợp lệ.' });
+      return;
+    }
+
+    const { provider, index, model } = parsed.data;
+
+    try {
+      await GeminiService.setKeyModel({ provider, index, model });
+
+      // Log admin action
+      await query(
+        `INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address)
+         VALUES ($1, 'UPDATE_KEY_MODEL', 'system', 'gemini_ai', $2, $3)`,
+        [req.user?.id || null, JSON.stringify({ provider, index, model }), req.ip]
+      );
+
+      const { keyUsageMap, tokenStats } = await GeminiService.getKeyUsageStats();
+      res.status(200).json({
+        message: `Đã gán mô hình "${model}" cho ${provider === 'third_party' ? 'Token' : 'API Key'} #${index} thành công.`,
+        config: GeminiService.getAiConfigSummary(keyUsageMap, tokenStats),
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Không thể cập nhật mô hình cho Key.' });
+    }
+  }
+
+  /**
    * Clear all API keys from the pool (reset to Mock mode)
    */
   static async clearAllAiKeys(req: Request, res: Response): Promise<void> {

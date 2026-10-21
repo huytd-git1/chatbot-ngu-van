@@ -180,4 +180,45 @@ describe('Gemini Multi-API-Key Pool & Auto-Failover', () => {
     summary = GeminiService.getAiConfigSummary();
     expect(summary.keyCount).toBe(4);
   });
+
+  it('allows selecting different models for each API key and persists to pool', async () => {
+    await GeminiService.clearAllKeys('google_official');
+    await GeminiService.clearAllKeys('third_party');
+
+    // Add keys with specific model via KEY|MODEL syntax and default
+    await GeminiService.updateAiConfig({
+      apiKey: 'AIzaSyGoogleKey1_1111111111|gemini-3.6-flash\nAIzaSyGoogleKey2_2222222222|gemini-2.5-flash-lite',
+      modelName: 'gemini-3.8-flash',
+      customApiKey: 'sk-third-key-1|deepseek/deepseek-chat\nsk-third-key-2',
+      customModelName: 'gemini-2.5-flash',
+    });
+
+    let summary = GeminiService.getAiConfigSummary();
+    expect(summary.keyPool[0].model).toBe('gemini-3.6-flash');
+    expect(summary.keyPool[1].model).toBe('gemini-2.5-flash-lite');
+    expect(summary.customKeyPool[0].model).toBe('deepseek/deepseek-chat');
+    expect(summary.customKeyPool[1].model).toBe('gemini-2.5-flash'); // fallback to default custom model
+
+    // Update model for key 2 in Google pool
+    await GeminiService.setKeyModel({
+      provider: 'google_official',
+      index: 2,
+      model: 'gemini-1.5-flash',
+    });
+
+    // Update model for key 2 in Third-party pool
+    await GeminiService.setKeyModel({
+      provider: 'third_party',
+      index: 2,
+      model: 'openai/gpt-4o-mini',
+    });
+
+    summary = GeminiService.getAiConfigSummary();
+    expect(summary.keyPool[1].model).toBe('gemini-1.5-flash');
+    expect(summary.customKeyPool[1].model).toBe('openai/gpt-4o-mini');
+
+    // Verify model lookup helper
+    expect(GeminiService.getModelForKey('AIzaSyGoogleKey2_2222222222', 'google_official')).toBe('gemini-1.5-flash');
+    expect(GeminiService.getModelForKey('sk-third-key-2', 'third_party')).toBe('openai/gpt-4o-mini');
+  });
 });

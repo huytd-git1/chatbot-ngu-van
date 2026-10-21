@@ -60,7 +60,7 @@ Hệ thống là ứng dụng Web RAG (Retrieval-Augmented Generation) chuyên b
    - Tài khoản, vai trò và phân quyền (`users`, `sessions`, `teacher_assignments`).
    - Danh mục đào tạo (`classes`, `works`, `class_work_access`).
    - Quản lý tài liệu và phân đoạn ngữ văn (`documents`, `work_paragraphs`, `indexing_jobs`).
-   - Cấu hình hạ tầng AI bền vững (`ai_settings` lưu trữ dàn key pool Google và token bên thứ ba, lựa chọn model, preset).
+   - Cấu hình hạ tầng AI bền vững (`ai_settings` lưu trữ dàn key pool Google và token bên thứ ba, lựa chọn model tổng thể và model riêng cho từng key qua `key_models`, preset cổng chuyển mạch).
    - Kiểm soát hạn mức và nhật ký (`quota_settings`, `quota_overrides`, `quota_extra_grants`, `daily_usage`, `idempotency_keys`, `audit_logs`, `chat_sessions`, `chat_messages`).
 2. **Gemini File Search Store:** Lưu trữ vector embeddings đám mây của Google (mô hình `models/gemini-embedding-2`), phục vụ truy xuất ngữ nghĩa (semantic search) cho nhánh Google Official.
 3. **Local/Managed Upload Storage:** Thư mục lưu trữ tạm các tệp tài liệu `.txt` và `.md` trước khi băm nhỏ và nạp vào cơ sở dữ liệu.
