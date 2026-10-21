@@ -680,7 +680,14 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                         {msg.isLiveAi ? (
                           <span className="flex items-center gap-1 text-emerald-700 font-medium">
                             <Sparkles className="w-3 h-3 text-amber-500" />
-                            Google Gemini ({msg.modelUsed || 'Live'})
+                            {(() => {
+                              const rawModel = msg.modelUsed?.trim() || 'AI Trực tuyến';
+                              const cleanModel = rawModel
+                                .replace(/^Google Gemini\s*\((.*)\)$/i, '$1')
+                                .replace(/\s*\([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\)$/, '')
+                                .trim();
+                              return cleanModel || rawModel;
+                            })()}
                           </span>
                         ) : (
                           <span className="flex items-center gap-1 text-amber-900/80 font-medium bg-amber-50/80 px-2 py-0.5 rounded-md border border-amber-200/60" title="Chế độ phân tích tài liệu bài học trực tiếp">

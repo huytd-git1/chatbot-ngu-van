@@ -699,7 +699,18 @@ export class GeminiService {
       maskedCustomKey: maskedCustomKeySummary,
       customKeyPool: customMaskedKeys,
       thirdPartyPresets: this.THIRD_PARTY_PRESETS,
+      configuredModelName: this.getConfiguredModelName(),
     };
+  }
+
+  /**
+   * Returns the model name currently active according to providerType
+   */
+  public static getConfiguredModelName(): string {
+    if (this.providerType === 'third_party') {
+      return this.customModelName?.trim() || 'gemini-2.5-flash';
+    }
+    return this.activeModel || 'gemini-2.5-flash';
   }
 
   /**
@@ -1356,17 +1367,12 @@ export class GeminiService {
             success: true,
           });
 
-          let hostName = 'gateway';
-          try {
-            hostName = new URL(cleanBaseUrl).hostname;
-          } catch {}
-
           return {
             text,
             tokenCount: totalTokens,
             promptTokens: pTokens,
             outputTokens: oTokens,
-            modelUsed: `${modelToUse} (${hostName})`,
+            modelUsed: modelToUse,
             apiKeyMasked: this.maskKey(currentKey),
           };
         } catch (err: any) {

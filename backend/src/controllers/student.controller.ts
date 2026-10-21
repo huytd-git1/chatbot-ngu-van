@@ -278,7 +278,7 @@ export class StudentController {
           isNoSource: true,
           toolConfigured: ragResult.toolConfigured,
           toolActuallyUsed: ragResult.toolActuallyUsed,
-          modelUsed: ragResult.modelUsed || GeminiService.getAiConfigSummary().activeModel,
+          modelUsed: ragResult.modelUsed || GeminiService.getConfiguredModelName(),
           isLiveAi: ragResult.isLiveAi ?? GeminiService.isLiveApiConfigured(),
         });
         return;
@@ -312,7 +312,7 @@ export class StudentController {
         isNoSource: false,
         toolConfigured: ragResult.toolConfigured,
         toolActuallyUsed: ragResult.toolActuallyUsed,
-        modelUsed: ragResult.modelUsed || GeminiService.getAiConfigSummary().activeModel,
+        modelUsed: ragResult.modelUsed || GeminiService.getConfiguredModelName(),
         isLiveAi: ragResult.isLiveAi ?? GeminiService.isLiveApiConfigured(),
       });
     } catch (err: any) {
