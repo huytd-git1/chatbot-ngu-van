@@ -8,7 +8,7 @@ import {
   Globe, ExternalLink, Network, Server
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
-import type { KeyPoolItem, TokenStatsSummary, ThirdPartyPreset } from '../types.js';
+import type { KeyPoolItem, TokenStatsSummary, ThirdPartyPreset, SupportedModel, ThirdPartyModel } from '../types.js';
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'teachers' | 'classes' | 'ai' | 'system' | 'logs'>('teachers');
@@ -51,7 +51,7 @@ export const AdminDashboard: React.FC = () => {
   const [refreshingStats, setRefreshingStats] = useState(false);
   const [resettingStats, setResettingStats] = useState(false);
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
-  const [supportedModels, setSupportedModels] = useState<any[]>([]);
+  const [supportedModels, setSupportedModels] = useState<SupportedModel[]>([]);
 
   // Third-Party Gateway settings (RouteAPI, OpenRouter, DeepSeek, etc.)
   const [customBaseUrl, setCustomBaseUrl] = useState('https://api.routeapi.ai/v1');
@@ -62,8 +62,18 @@ export const AdminDashboard: React.FC = () => {
   const [customKeyCount, setCustomKeyCount] = useState(0);
   const [customKeyPool, setCustomKeyPool] = useState<KeyPoolItem[]>([]);
   const [thirdPartyPresets, setThirdPartyPresets] = useState<ThirdPartyPreset[]>([]);
+  const [thirdPartyModels, setThirdPartyModels] = useState<ThirdPartyModel[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState('routeapi');
   const [updatingKeyModel, setUpdatingKeyModel] = useState<string | null>(null);
+
+  // Dynamic model addition states
+  const [newThirdPartyModelInput, setNewThirdPartyModelInput] = useState('');
+  const [newGoogleModelId, setNewGoogleModelId] = useState('');
+  const [newGoogleModelName, setNewGoogleModelName] = useState('');
+  const [newGoogleModelBadge, setNewGoogleModelBadge] = useState('');
+
+  // Auto synchronization of target model to all keys in pool
+  const [applyModelToAllKeys, setApplyModelToAllKeys] = useState(true);
 
   const [isLiveAiConfigured, setIsLiveAiConfigured] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
@@ -161,6 +171,14 @@ export const AdminDashboard: React.FC = () => {
       setCustomKeyCount(data.customKeyCount || 0);
       setCustomKeyPool(data.customKeyPool || []);
       if (data.thirdPartyPresets) setThirdPartyPresets(data.thirdPartyPresets);
+      if (data.thirdPartyModels && data.thirdPartyModels.length > 0) {
+        setThirdPartyModels(data.thirdPartyModels);
+      } else if (data.thirdPartyPresets) {
+        const activePreset = data.thirdPartyPresets.find((p: any) => p.id === selectedPresetId);
+        if (activePreset?.suggestedModels && activePreset.suggestedModels.length > 0) {
+          setThirdPartyModels(activePreset.suggestedModels);
+        }
+      }
     } catch {}
   };
 
@@ -346,6 +364,81 @@ export const AdminDashboard: React.FC = () => {
     setCustomBaseUrl(preset.baseUrl);
     if (preset.suggestedModels && preset.suggestedModels.length > 0) {
       setCustomModelName(preset.suggestedModels[0].id);
+      // Ensure preset models are in thirdPartyModels list
+      setThirdPartyModels((prev) => {
+        const merged = [...prev];
+        for (const sm of preset.suggestedModels) {
+          if (!merged.some((m) => m.id === sm.id)) {
+            merged.push(sm);
+          }
+        }
+        return merged;
+      });
+    }
+  };
+
+  const handleAddThirdPartyModel = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newThirdPartyModelInput.trim();
+    if (!trimmed) return;
+    if (!thirdPartyModels.some((m) => m.id.toLowerCase() === trimmed.toLowerCase())) {
+      const updated = [...thirdPartyModels, { id: trimmed, name: trimmed }];
+      setThirdPartyModels(updated);
+      setCustomModelName(trimmed);
+    } else {
+      setCustomModelName(trimmed);
+    }
+    setNewThirdPartyModelInput('');
+  };
+
+  const handleDeleteThirdPartyModel = (modelId: string) => {
+    const updated = thirdPartyModels.filter((m) => m.id !== modelId);
+    setThirdPartyModels(updated);
+    if (customModelName === modelId) {
+      if (updated.length > 0) {
+        setCustomModelName(updated[0].id);
+      } else {
+        setCustomModelName('gemini-2.5-flash');
+      }
+    }
+  };
+
+  const handleAddGoogleModel = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmedId = newGoogleModelId.trim();
+    if (!trimmedId) return;
+    const name = newGoogleModelName.trim() || trimmedId;
+    const badge = newGoogleModelBadge.trim() || 'Tùy chỉnh';
+    if (!supportedModels.some((m) => m.id.toLowerCase() === trimmedId.toLowerCase())) {
+      const updated = [
+        ...supportedModels,
+        {
+          id: trimmedId,
+          name,
+          badge,
+          description: `Mô hình tùy chỉnh ${trimmedId}`,
+        },
+      ];
+      setSupportedModels(updated);
+      setSelectedModel(trimmedId);
+    } else {
+      setSelectedModel(trimmedId);
+    }
+    setNewGoogleModelId('');
+    setNewGoogleModelName('');
+    setNewGoogleModelBadge('');
+  };
+
+  const handleDeleteGoogleModel = (modelId: string) => {
+    if (!confirm(`Bạn có chắc muốn xóa mô hình "${modelId}" khỏi danh sách lựa chọn không?`)) return;
+    const updated = supportedModels.filter((m) => m.id !== modelId);
+    setSupportedModels(updated);
+    if (selectedModel === modelId) {
+      if (updated.length > 0) {
+        setSelectedModel(updated[0].id);
+      } else {
+        setSelectedModel('gemini-2.5-flash');
+      }
     }
   };
 
@@ -363,11 +456,20 @@ export const AdminDashboard: React.FC = () => {
           customBaseUrl: customBaseUrl.trim() || undefined,
           customApiKey: customApiKeyInput.trim() || undefined,
           customModelName: customModelName.trim() || undefined,
+          applyToAllKeys: applyModelToAllKeys,
+          supportedModels,
+          thirdPartyModels,
         }),
       });
       setSaveAiMsg({ type: 'success', text: res.message || 'Đã lưu cấu hình AI thành công.' });
       setApiKeyInput('');
       setCustomApiKeyInput('');
+      if (res.config) {
+        if (res.config.keyPool) setKeyPool(res.config.keyPool);
+        if (res.config.customKeyPool) setCustomKeyPool(res.config.customKeyPool);
+        if (res.config.supportedModels) setSupportedModels(res.config.supportedModels);
+        if (res.config.thirdPartyModels) setThirdPartyModels(res.config.thirdPartyModels);
+      }
       loadAiSettings();
       loadSettings();
     } catch (err: any) {
@@ -1318,32 +1420,15 @@ export const AdminDashboard: React.FC = () => {
                                 title={`Chọn mô hình hoạt động riêng cho Token #${k.index}`}
                                 className="flex-1 bg-white text-indigo-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-indigo-200/90 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
                               >
-                                <option value={customModelName}>Mặc định ({customModelName})</option>
-                                {thirdPartyPresets
-                                  .find((p) => p.id === selectedPresetId)
-                                  ?.suggestedModels?.map((sm) => (
-                                    <option key={sm.id} value={sm.id}>
-                                      {sm.name}
-                                    </option>
-                                  ))}
-                                <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                                <option value="google/gemini-2.5-flash">google/gemini-2.5-flash</option>
-                                <option value="deepseek/deepseek-chat">deepseek/deepseek-chat</option>
-                                <option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>
-                                <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
+                                <option value={customModelName}>Mục tiêu chung ({customModelName})</option>
+                                {thirdPartyModels.map((tm) => (
+                                  <option key={tm.id} value={tm.id}>
+                                    {tm.name} ({tm.id})
+                                  </option>
+                                ))}
                                 {k.model &&
-                                  ![
-                                    customModelName,
-                                    'gemini-3.6-flash',
-                                    'gemini-3.5-flash',
-                                    'gemini-2.5-flash',
-                                    'google/gemini-2.5-flash',
-                                    'deepseek/deepseek-chat',
-                                    'openai/gpt-4o-mini',
-                                    'claude-3-5-sonnet',
-                                  ].includes(k.model) && (
+                                  !thirdPartyModels.some((tm) => tm.id === k.model) &&
+                                  k.model !== customModelName && (
                                     <option value={k.model}>{k.model} (Hiện tại)</option>
                                   )}
                               </select>
@@ -1468,56 +1553,99 @@ export const AdminDashboard: React.FC = () => {
                 </div>
 
                 {/* Custom Model Selection */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-700 block">
-                    Tên Mô hình Mục tiêu (Target Model ID):
-                  </label>
+                <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200/80 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                      <Cpu className="w-4 h-4 text-indigo-600" />
+                      Tên Mô hình Mục tiêu (Target Model ID):
+                    </label>
+                    <span className="text-[10px] text-indigo-600 font-semibold bg-indigo-100/70 px-2 py-0.5 rounded-md">
+                      {thirdPartyModels.length} mô hình khả dụng
+                    </span>
+                  </div>
 
-                  {/* Suggested Models Pills for Current Preset */}
-                  {(() => {
-                    const activePreset = thirdPartyPresets.find(
-                      (p) => p.id === selectedPresetId || p.baseUrl === customBaseUrl
-                    );
-                    const modelsToShow = activePreset?.suggestedModels?.length
-                      ? activePreset.suggestedModels.map((m) => ({ id: m.id, label: m.name }))
-                      : [
-                          { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
-                          { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
-                          { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                          { id: 'google/gemini-2.5-flash', label: 'Google/Gemini 2.5' },
-                          { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
-                          { id: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' },
-                          { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
-                        ];
-                    return (
-                      <div className="flex flex-wrap gap-2">
-                        {modelsToShow.map((sm) => (
+                  {/* Dynamic Models Pills with Delete button */}
+                  <div className="flex flex-wrap gap-2">
+                    {thirdPartyModels.map((sm) => {
+                      const isSelected = customModelName === sm.id;
+                      return (
+                        <div
+                          key={sm.id}
+                          onClick={() => setCustomModelName(sm.id)}
+                          className={`inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-mono transition-all cursor-pointer border ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-2xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span>{sm.name || sm.id}</span>
+                          {sm.name && sm.name !== sm.id && (
+                            <span className="opacity-70 text-[10px] ml-1">({sm.id})</span>
+                          )}
                           <button
-                            key={sm.id}
                             type="button"
-                            onClick={() => setCustomModelName(sm.id)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-mono transition-all cursor-pointer border ${
-                              customModelName === sm.id
-                                ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-2xs'
-                                : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteThirdPartyModel(sm.id);
+                            }}
+                            title={`Xóa mô hình ${sm.id} khỏi danh sách`}
+                            className="ml-2 p-0.5 rounded-md hover:bg-black/20 text-current transition-colors cursor-pointer"
                           >
-                            {sm.label} <span className="opacity-70 text-[10px]">({sm.id})</span>
+                            <X className="w-3 h-3" />
                           </button>
-                        ))}
-                      </div>
-                    );
-                  })()}
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                  <div className="pt-1">
+                  {/* Add New Model Form */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="Nhập mã mô hình mới (vd: deepseek/deepseek-r1, gpt-4o, qwen/qwen-2.5-72b)..."
+                      value={newThirdPartyModelInput}
+                      onChange={(e) => setNewThirdPartyModelInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddThirdPartyModel();
+                        }
+                      }}
+                      className="flex-1 text-xs p-2.5 rounded-xl border border-indigo-200 bg-white font-mono focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddThirdPartyModel()}
+                      disabled={!newThirdPartyModelInput.trim()}
+                      className="px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Thêm mô hình</span>
+                    </button>
+                  </div>
+
+                  {/* Direct input for Target Model ID */}
+                  <div>
+                    <label className="text-[11px] text-slate-600 block mb-1">Định danh mô hình mục tiêu đang kích hoạt:</label>
                     <input
                       type="text"
                       placeholder="Hoặc nhập định danh mô hình tùy ý (vd: google/gemini-2.5-flash, deepseek/deepseek-chat...)"
                       value={customModelName}
                       onChange={(e) => setCustomModelName(e.target.value.trim())}
-                      className="w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none"
+                      className="w-full text-xs p-2.5 rounded-xl border border-indigo-200 bg-white font-mono focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
                     />
                   </div>
+
+                  {/* Sync to all keys checkbox */}
+                  <label className="flex items-center gap-2.5 cursor-pointer pt-1 text-xs text-indigo-950 font-semibold select-none bg-indigo-100/40 p-2.5 rounded-xl border border-indigo-200/60">
+                    <input
+                      type="checkbox"
+                      checked={applyModelToAllKeys}
+                      onChange={(e) => setApplyModelToAllKeys(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span>Tự động cập nhật mô hình mục tiêu này cho toàn bộ Token API trong dàn khi bấm Lưu cấu hình AI</span>
+                  </label>
                 </div>
               </div>
             ) : (
@@ -1790,16 +1918,22 @@ export const AdminDashboard: React.FC = () => {
                 </div>
 
                 {/* Model Selection */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-700 block">
-                    Lựa chọn Mô hình AI (Model Selection):
-                  </label>
+                <div className="space-y-3 p-4 rounded-2xl bg-slate-50/80 border border-slate-200/90 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Cpu className="w-4 h-4 text-amber-700" />
+                      Lựa chọn Mô hình AI (Model Selection):
+                    </label>
+                    <span className="text-[10px] text-slate-600 font-semibold bg-slate-200/70 px-2 py-0.5 rounded-md">
+                      {supportedModels.length} mô hình Gemini
+                    </span>
+                  </div>
 
                   <div className="grid grid-cols-1 gap-2.5">
                     {supportedModels.map((m) => {
                       const isSelected = selectedModel === m.id;
                       return (
-                        <label
+                        <div
                           key={m.id}
                           onClick={() => setSelectedModel(m.id)}
                           className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between ${
@@ -1808,7 +1942,7 @@ export const AdminDashboard: React.FC = () => {
                               : 'border-[#e8e2d5] bg-white hover:bg-[#fbf9f4]'
                           }`}
                         >
-                          <div className="flex items-start gap-3">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
                             <input
                               type="radio"
                               name="geminiModel"
@@ -1817,7 +1951,7 @@ export const AdminDashboard: React.FC = () => {
                               onChange={() => setSelectedModel(m.id)}
                               className="mt-1 text-[#0f2942]"
                             />
-                            <div>
+                            <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-[#0f2942]">{m.name}</span>
                                 {m.badge && (
@@ -1836,23 +1970,97 @@ export const AdminDashboard: React.FC = () => {
                               <code className="text-[10px] font-mono text-slate-400 mt-1 block">ID: {m.id}</code>
                             </div>
                           </div>
-                          <Cpu className={`w-4 h-4 shrink-0 mt-1 ${isSelected ? 'text-[#0f2942]' : 'text-slate-300'}`} />
-                        </label>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <Cpu className={`w-4 h-4 ${isSelected ? 'text-[#0f2942]' : 'text-slate-300'}`} />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteGoogleModel(m.id);
+                              }}
+                              title={`Xóa mô hình ${m.id} khỏi danh sách`}
+                              className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
 
+                  {/* Add New Gemini Model Box */}
+                  <div className="p-3 bg-white border border-slate-200/90 rounded-xl space-y-2 shadow-2xs">
+                    <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
+                      <Plus className="w-3.5 h-3.5 text-amber-700" />
+                      Thêm mô hình Gemini mới:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Mã mô hình (ID) *:</label>
+                        <input
+                          type="text"
+                          placeholder="vd: gemini-2.0-flash"
+                          value={newGoogleModelId}
+                          onChange={(e) => setNewGoogleModelId(e.target.value.trim())}
+                          className="w-full text-xs p-2 rounded-lg border border-slate-200 bg-[#fbf9f4] font-mono focus:ring-1 focus:ring-[#0f2942]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Tên hiển thị:</label>
+                        <input
+                          type="text"
+                          placeholder="vd: Gemini 2.0 Flash"
+                          value={newGoogleModelName}
+                          onChange={(e) => setNewGoogleModelName(e.target.value)}
+                          className="w-full text-xs p-2 rounded-lg border border-slate-200 bg-[#fbf9f4] focus:ring-1 focus:ring-[#0f2942]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Huy hiệu (Badge):</label>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            placeholder="vd: Tải cao"
+                            value={newGoogleModelBadge}
+                            onChange={(e) => setNewGoogleModelBadge(e.target.value)}
+                            className="w-full text-xs p-2 rounded-lg border border-slate-200 bg-[#fbf9f4] focus:ring-1 focus:ring-[#0f2942]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddGoogleModel()}
+                            disabled={!newGoogleModelId.trim()}
+                            className="px-3 py-2 bg-[#0f2942] hover:bg-[#1e3a5f] text-white rounded-lg text-xs font-semibold shrink-0 cursor-pointer disabled:opacity-50"
+                          >
+                            Thêm
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Custom Model input */}
-                  <div className="pt-2">
-                    <label className="text-[11px] text-slate-600 block mb-1">Hoặc nhập mã mô hình Gemini tùy chỉnh khác:</label>
+                  <div>
+                    <label className="text-[11px] text-slate-600 block mb-1">Mã mô hình Gemini mục tiêu đang kích hoạt:</label>
                     <input
                       type="text"
-                      placeholder="Ví dụ: gemini-1.5-flash, gemini-1.5-pro..."
+                      placeholder="Ví dụ: gemini-3.8-flash, gemini-3.6-flash, gemini-2.5-flash..."
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value.trim())}
-                      className="w-full text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono"
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none"
                     />
                   </div>
+
+                  {/* Sync to all keys checkbox */}
+                  <label className="flex items-center gap-2.5 cursor-pointer pt-1 text-xs text-emerald-950 font-semibold select-none bg-emerald-100/40 p-2.5 rounded-xl border border-emerald-200/60">
+                    <input
+                      type="checkbox"
+                      checked={applyModelToAllKeys}
+                      onChange={(e) => setApplyModelToAllKeys(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span>Tự động cập nhật mô hình mục tiêu này cho toàn bộ Google API Key trong dàn khi bấm Lưu cấu hình AI</span>
+                  </label>
                 </div>
               </div>
             )}

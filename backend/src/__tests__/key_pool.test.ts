@@ -221,4 +221,53 @@ describe('Gemini Multi-API-Key Pool & Auto-Failover', () => {
     expect(GeminiService.getModelForKey('AIzaSyGoogleKey2_2222222222', 'google_official')).toBe('gemini-1.5-flash');
     expect(GeminiService.getModelForKey('sk-third-key-2', 'third_party')).toBe('openai/gpt-4o-mini');
   });
+
+  it('manages dynamic models and synchronizes target model to all keys when applyToAllKeys is true', async () => {
+    // Add custom models dynamically
+    GeminiService.addModel('google_official', {
+      id: 'gemini-custom-literature-pro',
+      name: 'Gemini Custom Literature Pro',
+      badge: 'Chuyên Văn',
+    });
+    GeminiService.addModel('third_party', {
+      id: 'qwen/qwen-2.5-72b-instruct',
+      name: 'Qwen 2.5 72B',
+    });
+
+    const supported = GeminiService.getSupportedModels();
+    expect(supported.some((m) => m.id === 'gemini-custom-literature-pro')).toBe(true);
+
+    const thirdParty = GeminiService.getThirdPartyModels();
+    expect(thirdParty.some((m) => m.id === 'qwen/qwen-2.5-72b-instruct')).toBe(true);
+
+    // Call updateAiConfig with applyToAllKeys for Google Official
+    await GeminiService.updateAiConfig({
+      replaceKeys: true,
+      providerType: 'google_official',
+      apiKey: 'AIzaSySyncKey1_111111111111\nAIzaSySyncKey2_222222222222',
+      modelName: 'gemini-custom-literature-pro',
+      applyToAllKeys: true,
+    });
+
+    let summary = GeminiService.getAiConfigSummary();
+    expect(summary.keyPool[0].model).toBe('gemini-custom-literature-pro');
+    expect(summary.keyPool[1].model).toBe('gemini-custom-literature-pro');
+
+    // Call updateAiConfig with applyToAllKeys for Third-Party
+    await GeminiService.updateAiConfig({
+      replaceKeys: true,
+      providerType: 'third_party',
+      customApiKey: 'sk-third-sync-1\nsk-third-sync-2',
+      customModelName: 'qwen/qwen-2.5-72b-instruct',
+      applyToAllKeys: true,
+    });
+
+    summary = GeminiService.getAiConfigSummary();
+    expect(summary.customKeyPool[0].model).toBe('qwen/qwen-2.5-72b-instruct');
+    expect(summary.customKeyPool[1].model).toBe('qwen/qwen-2.5-72b-instruct');
+
+    // Remove model
+    GeminiService.removeModel('third_party', 'qwen/qwen-2.5-72b-instruct');
+    expect(GeminiService.getThirdPartyModels().some((m) => m.id === 'qwen/qwen-2.5-72b-instruct')).toBe(false);
+  });
 });

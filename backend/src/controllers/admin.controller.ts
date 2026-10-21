@@ -416,6 +416,9 @@ export class AdminController {
       customApiKey: z.string().optional(),
       customModelName: z.string().optional(),
       replaceKeys: z.boolean().optional(),
+      applyToAllKeys: z.boolean().optional(),
+      supportedModels: z.array(z.any()).optional(),
+      thirdPartyModels: z.array(z.any()).optional(),
     });
 
     const parsed = schema.safeParse(req.body);
@@ -433,6 +436,9 @@ export class AdminController {
       customApiKey,
       customModelName,
       replaceKeys,
+      applyToAllKeys,
+      supportedModels,
+      thirdPartyModels,
     } = parsed.data;
 
     await GeminiService.updateAiConfig({
@@ -444,6 +450,9 @@ export class AdminController {
       customApiKey,
       customModelName,
       replaceKeys,
+      applyToAllKeys,
+      supportedModels,
+      thirdPartyModels,
     });
 
     const keyCount = apiKey ? GeminiService.parseKeys(apiKey).length : undefined;

@@ -204,7 +204,7 @@ export class GeminiService {
     lastUsedAt: string | null;
   }> = new Map();
 
-  public static readonly SUPPORTED_MODELS: SupportedModel[] = [
+  public static readonly DEFAULT_SUPPORTED_MODELS: SupportedModel[] = [
     {
       id: 'gemini-3.6-flash',
       name: 'Gemini 3.6 Flash',
@@ -234,6 +234,88 @@ export class GeminiService {
       description: 'Hạ tầng toàn cầu lớn, tương thích mọi tài khoản',
     },
   ];
+
+  public static readonly DEFAULT_THIRD_PARTY_MODELS: Array<{ id: string; name: string }> = [
+    { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Khuyên dùng)' },
+    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'google/gemini-2.5-flash', name: 'Google/Gemini 2.5' },
+    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
+    { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
+  ];
+
+  private static activeSupportedModels: SupportedModel[] = [...GeminiService.DEFAULT_SUPPORTED_MODELS];
+  private static activeThirdPartyModels: Array<{ id: string; name: string }> = [...GeminiService.DEFAULT_THIRD_PARTY_MODELS];
+
+  public static get SUPPORTED_MODELS(): SupportedModel[] {
+    return this.activeSupportedModels;
+  }
+
+  public static getSupportedModels(): SupportedModel[] {
+    return [...this.activeSupportedModels];
+  }
+
+  public static getThirdPartyModels(): Array<{ id: string; name: string }> {
+    return [...this.activeThirdPartyModels];
+  }
+
+  public static addModel(
+    provider: 'google_official' | 'third_party',
+    model: { id: string; name?: string; description?: string; badge?: string }
+  ): void {
+    const trimmedId = model.id?.trim();
+    if (!trimmedId) throw new Error('Mã mô hình (Model ID) không được để trống.');
+
+    if (provider === 'google_official') {
+      const existingIdx = this.activeSupportedModels.findIndex((m) => m.id === trimmedId);
+      if (existingIdx >= 0) {
+        this.activeSupportedModels[existingIdx] = {
+          id: trimmedId,
+          name: model.name?.trim() || this.activeSupportedModels[existingIdx].name,
+          description: model.description?.trim() || this.activeSupportedModels[existingIdx].description,
+          badge: model.badge?.trim() || this.activeSupportedModels[existingIdx].badge,
+        };
+      } else {
+        this.activeSupportedModels.push({
+          id: trimmedId,
+          name: model.name?.trim() || trimmedId,
+          description: model.description?.trim() || `Mô hình tùy chỉnh ${trimmedId}`,
+          badge: model.badge?.trim() || 'Tùy chỉnh',
+        });
+      }
+    } else {
+      const existingIdx = this.activeThirdPartyModels.findIndex((m) => m.id === trimmedId);
+      if (existingIdx >= 0) {
+        this.activeThirdPartyModels[existingIdx] = {
+          id: trimmedId,
+          name: model.name?.trim() || this.activeThirdPartyModels[existingIdx].name,
+        };
+      } else {
+        this.activeThirdPartyModels.push({
+          id: trimmedId,
+          name: model.name?.trim() || trimmedId,
+        });
+      }
+    }
+  }
+
+  public static removeModel(provider: 'google_official' | 'third_party', modelId: string): void {
+    const trimmedId = modelId?.trim();
+    if (!trimmedId) return;
+
+    if (provider === 'google_official') {
+      this.activeSupportedModels = this.activeSupportedModels.filter((m) => m.id !== trimmedId);
+      if (this.activeSupportedModels.length === 0) {
+        this.activeSupportedModels = [...this.DEFAULT_SUPPORTED_MODELS];
+      }
+    } else {
+      this.activeThirdPartyModels = this.activeThirdPartyModels.filter((m) => m.id !== trimmedId);
+      if (this.activeThirdPartyModels.length === 0) {
+        this.activeThirdPartyModels = [...this.DEFAULT_THIRD_PARTY_MODELS];
+      }
+    }
+  }
 
   /**
    * Parse single string with multiple keys separated by newlines, commas, or semicolons
@@ -327,6 +409,10 @@ export class GeminiService {
     const serialized = JSON.stringify({
       google: googleMap,
       third_party: thirdPartyMap,
+      available_models: {
+        google: this.activeSupportedModels,
+        third_party: this.activeThirdPartyModels,
+      },
     });
 
     try {
@@ -445,6 +531,14 @@ export class GeminiService {
                 if (typeof m === 'string') {
                   this.customKeyModels.set(k, m);
                 }
+              }
+            }
+            if (parsedKm?.available_models) {
+              if (Array.isArray(parsedKm.available_models.google) && parsedKm.available_models.google.length > 0) {
+                this.activeSupportedModels = parsedKm.available_models.google;
+              }
+              if (Array.isArray(parsedKm.available_models.third_party) && parsedKm.available_models.third_party.length > 0) {
+                this.activeThirdPartyModels = parsedKm.available_models.third_party;
               }
             }
           } catch (e) {
@@ -851,6 +945,7 @@ export class GeminiService {
       maskedCustomKey: maskedCustomKeySummary,
       customKeyPool: customMaskedKeys,
       thirdPartyPresets: this.THIRD_PARTY_PRESETS,
+      thirdPartyModels: this.activeThirdPartyModels,
       configuredModelName: this.getConfiguredModelName(),
     };
   }
@@ -877,6 +972,9 @@ export class GeminiService {
     customApiKey?: string;
     customModelName?: string;
     replaceKeys?: boolean;
+    applyToAllKeys?: boolean;
+    supportedModels?: SupportedModel[];
+    thirdPartyModels?: Array<{ id: string; name: string }>;
   }): Promise<void> {
     const {
       apiKey,
@@ -887,7 +985,17 @@ export class GeminiService {
       customApiKey,
       customModelName,
       replaceKeys = false,
+      applyToAllKeys = false,
+      supportedModels,
+      thirdPartyModels,
     } = params;
+
+    if (supportedModels && Array.isArray(supportedModels) && supportedModels.length > 0) {
+      this.activeSupportedModels = supportedModels;
+    }
+    if (thirdPartyModels && Array.isArray(thirdPartyModels) && thirdPartyModels.length > 0) {
+      this.activeThirdPartyModels = thirdPartyModels;
+    }
 
     if (providerType !== undefined) {
       this.providerType = providerType;
@@ -957,6 +1065,20 @@ export class GeminiService {
     }
     if (embeddingModel !== undefined && embeddingModel.trim() !== '') {
       this.activeEmbeddingModel = embeddingModel.trim();
+    }
+
+    if (applyToAllKeys) {
+      if (this.providerType === 'third_party' && this.customModelName) {
+        for (const key of this.customApiKeys) {
+          this.customKeyModels.set(key, this.customModelName);
+          this.customKeyModels.set(this.hashKey(key), this.customModelName);
+        }
+      } else if (this.providerType === 'google_official' && this.activeModel) {
+        for (const key of this.activeApiKeys) {
+          this.activeKeyModels.set(key, this.activeModel);
+          this.activeKeyModels.set(this.hashKey(key), this.activeModel);
+        }
+      }
     }
 
     this.clientsCache.clear();

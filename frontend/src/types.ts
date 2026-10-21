@@ -185,4 +185,17 @@ export interface ThirdPartyPreset {
   description: string;
 }
 
+export interface SupportedModel {
+  id: string;
+  name: string;
+  description?: string;
+  badge?: string;
+}
+
+export interface ThirdPartyModel {
+  id: string;
+  name: string;
+}
+
+
 
