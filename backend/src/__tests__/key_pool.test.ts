@@ -139,4 +139,45 @@ describe('Gemini Multi-API-Key Pool & Auto-Failover', () => {
     expect(afterReset.tokenStats.totalTokens).toBe(0);
     expect(afterReset.tokenStats.totalRequests).toBe(0);
   });
+
+  it('appends new keys without deleting existing keys when updateAiConfig is called', async () => {
+    await GeminiService.clearAllKeys('google_official');
+    await GeminiService.clearAllKeys('third_party');
+
+    // 1. Initial configuration with 2 keys
+    await GeminiService.updateAiConfig({
+      apiKey: 'AIzaSyInitial_1111111111\nAIzaSyInitial_2222222222',
+      customApiKey: 'sk-third-party-initial-1',
+    });
+
+    let summary = GeminiService.getAiConfigSummary();
+    expect(summary.keyCount).toBe(2);
+    expect(summary.customKeyCount).toBe(1);
+
+    // 2. Add 2 more keys to Google pool, and 1 more key to Third-party pool
+    await GeminiService.updateAiConfig({
+      apiKey: 'AIzaSyNew_3333333333, AIzaSyNew_4444444444',
+      customApiKey: 'sk-third-party-new-2',
+    });
+
+    summary = GeminiService.getAiConfigSummary();
+    // Must contain 4 keys total in Google pool (not replaced by 2)
+    expect(summary.keyCount).toBe(4);
+    expect(summary.keyPool.map((k) => k.maskedKey)).toEqual([
+      'AIzaSy...1111',
+      'AIzaSy...2222',
+      'AIzaSy...3333',
+      'AIzaSy...4444',
+    ]);
+
+    // Must contain 2 tokens total in Third-party pool
+    expect(summary.customKeyCount).toBe(2);
+
+    // 3. Adding an already existing key should not create duplicates
+    await GeminiService.updateAiConfig({
+      apiKey: 'AIzaSyNew_3333333333',
+    });
+    summary = GeminiService.getAiConfigSummary();
+    expect(summary.keyCount).toBe(4);
+  });
 });

@@ -415,6 +415,7 @@ export class AdminController {
       customBaseUrl: z.string().optional(),
       customApiKey: z.string().optional(),
       customModelName: z.string().optional(),
+      replaceKeys: z.boolean().optional(),
     });
 
     const parsed = schema.safeParse(req.body);
@@ -431,6 +432,7 @@ export class AdminController {
       customBaseUrl,
       customApiKey,
       customModelName,
+      replaceKeys,
     } = parsed.data;
 
     await GeminiService.updateAiConfig({
@@ -441,6 +443,7 @@ export class AdminController {
       customBaseUrl,
       customApiKey,
       customModelName,
+      replaceKeys,
     });
 
     const keyCount = apiKey ? GeminiService.parseKeys(apiKey).length : undefined;

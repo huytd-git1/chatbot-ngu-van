@@ -71,6 +71,7 @@ describe('Third-Party API Gateway (RouteAPI / OpenRouter / Custom)', () => {
   });
 
   it('correctly deletes a third-party token by index and clears all third-party tokens', async () => {
+    await GeminiService.clearAllKeys('third_party');
     await GeminiService.updateAiConfig({
       providerType: 'third_party',
       customApiKey: 'sk-token-A_aaaa\nsk-token-B_bbbb\nsk-token-C_cccc',

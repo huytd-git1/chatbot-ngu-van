@@ -713,6 +713,7 @@ export class GeminiService {
     customBaseUrl?: string;
     customApiKey?: string;
     customModelName?: string;
+    replaceKeys?: boolean;
   }): Promise<void> {
     const {
       apiKey,
@@ -722,6 +723,7 @@ export class GeminiService {
       customBaseUrl,
       customApiKey,
       customModelName,
+      replaceKeys = false,
     } = params;
 
     if (providerType !== undefined) {
@@ -733,7 +735,18 @@ export class GeminiService {
     if (customApiKey !== undefined && customApiKey.trim() !== '') {
       const parsedCustom = this.parseKeys(customApiKey);
       if (parsedCustom.length > 0) {
-        this.customApiKeys = parsedCustom;
+        if (replaceKeys) {
+          this.customApiKeys = parsedCustom;
+        } else {
+          // Bổ sung các key mới vào danh sách hiện có mà không xóa các key cũ
+          const mergedCustom = [...this.customApiKeys];
+          for (const k of parsedCustom) {
+            if (!mergedCustom.includes(k)) {
+              mergedCustom.push(k);
+            }
+          }
+          this.customApiKeys = mergedCustom;
+        }
         this.customRoundRobinIndex = 0;
         this.customKeyCooldowns.clear();
       }
@@ -745,7 +758,18 @@ export class GeminiService {
     if (apiKey !== undefined && apiKey.trim() !== '') {
       const parsedKeys = this.parseKeys(apiKey);
       if (parsedKeys.length > 0) {
-        this.activeApiKeys = parsedKeys;
+        if (replaceKeys) {
+          this.activeApiKeys = parsedKeys;
+        } else {
+          // Bổ sung các key mới vào danh sách hiện có mà không xóa các key cũ
+          const merged = [...this.activeApiKeys];
+          for (const k of parsedKeys) {
+            if (!merged.includes(k)) {
+              merged.push(k);
+            }
+          }
+          this.activeApiKeys = merged;
+        }
         this.roundRobinIndex = 0;
         this.keyCooldowns.clear();
         this.clientsCache.clear();
@@ -760,9 +784,9 @@ export class GeminiService {
 
     this.clientsCache.clear();
 
-    // Persist to DB
-    const keysToStore = apiKey !== undefined ? (apiKey.trim() || null) : (this.activeApiKeys.join('\n') || null);
-    const customKeysToStore = customApiKey !== undefined ? (customApiKey.trim() || null) : (this.customApiKeys.join('\n') || null);
+    // Persist full active pools to DB (bảo toàn toàn bộ key cũ + key mới)
+    const keysToStore = this.activeApiKeys.length > 0 ? this.activeApiKeys.join('\n') : null;
+    const customKeysToStore = this.customApiKeys.length > 0 ? this.customApiKeys.join('\n') : null;
 
     await query(
       `INSERT INTO ai_settings (id, api_key, model_name, embedding_model, provider_type, custom_base_url, custom_api_key, custom_model_name, updated_at)

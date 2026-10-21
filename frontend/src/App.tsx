@@ -169,7 +169,7 @@ export const App: React.FC = () => {
       </main>
 
       <footer className="border-t border-[#e8e2d5] bg-white/60 py-4 text-center text-xs text-slate-500">
-        Cô Dương dạy văn dễ thương &copy; 2026 &bull; Chatbot RAG Ngữ văn dựa trên tài liệu giáo viên cung cấp
+        Cô Dương dạy văn dễ thương &copy; 2026 &bull; made by huytd
       </footer>
 
       {/* Modals */}

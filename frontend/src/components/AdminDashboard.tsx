@@ -1359,7 +1359,7 @@ export const AdminDashboard: React.FC = () => {
                     <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                       <Layers className="w-4 h-4 text-slate-500" />
                       {hasCustomApiKey
-                        ? 'Thêm / Thay thế danh sách Token Bên Thứ Ba:'
+                        ? 'Thêm Token Bên Thứ Ba mới vào dàn Key:'
                         : 'Nhập danh sách Token Bên Thứ Ba:'}
                     </label>
                     <div className="flex items-center gap-2">
@@ -1382,7 +1382,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="relative">
                     <textarea
                       rows={3}
-                      placeholder={`Dán một hoặc nhiều API Key / Bearer Token tại đây (Mỗi token một dòng):\nsk-route-xxxx...\nsk-route-yyyy...\nsk-or-v1-zzzz...`}
+                      placeholder={`Dán thêm một hoặc nhiều API Key / Bearer Token tại đây (Mỗi token một dòng):\nsk-route-xxxx...\nsk-route-yyyy...\nsk-or-v1-zzzz...`}
                       value={customApiKeyInput}
                       onChange={(e) => setCustomApiKeyInput(e.target.value)}
                       className={`w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none resize-y ${
@@ -1392,7 +1392,7 @@ export const AdminDashboard: React.FC = () => {
                   </div>
 
                   <p className="text-[11px] text-slate-500">
-                    Token được bảo vệ an toàn trên hệ thống và tự động phân bổ tải xoay vòng nếu bạn nhập nhiều token.
+                    Token mới nhập sẽ tự động được bổ sung vào dàn Key hiện có (không xóa key cũ). Hệ thống phân bổ tải xoay vòng an toàn. Muốn xóa bớt, bấm biểu tượng thùng rác ở danh sách bên dưới.
                   </p>
                 </div>
 
@@ -1645,7 +1645,7 @@ export const AdminDashboard: React.FC = () => {
                     <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                       <Layers className="w-4 h-4 text-slate-500" />
                       {hasSavedKey
-                        ? 'Thêm / Thay thế danh sách Google Gemini API Keys:'
+                        ? 'Thêm Google Gemini API Key mới vào dàn Key:'
                         : 'Nhập danh sách Google Gemini API Keys:'}
                     </label>
                     <div className="flex items-center gap-2">
@@ -1668,7 +1668,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="relative">
                     <textarea
                       rows={3}
-                      placeholder={`Dán một hoặc nhiều API Key tại đây (Mỗi key một dòng hoặc cách nhau bởi dấu phẩy):\nAIzaSyA...\nAIzaSyB...\nAIzaSyC...`}
+                      placeholder={`Dán thêm một hoặc nhiều API Key tại đây (Mỗi key một dòng hoặc cách nhau bởi dấu phẩy):\nAIzaSyA...\nAIzaSyB...\nAIzaSyC...`}
                       value={apiKeyInput}
                       onChange={(e) => setApiKeyInput(e.target.value)}
                       className={`w-full text-xs p-3 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-mono focus:ring-2 focus:ring-[#0f2942]/20 focus:outline-none resize-y ${
@@ -1678,7 +1678,7 @@ export const AdminDashboard: React.FC = () => {
                   </div>
 
                   <p className="text-[11px] text-slate-500">
-                    Gợi ý: Quý thầy cô có thể tạo API Key từ các tài khoản Google tại{' '}
+                    API Key mới nhập sẽ tự động được bổ sung vào dàn Key hiện có (không xóa key cũ). Quý thầy cô có thể lấy thêm key tại{' '}
                     <a
                       href="https://aistudio.google.com/app/apikey"
                       target="_blank"
@@ -1686,7 +1686,7 @@ export const AdminDashboard: React.FC = () => {
                       className="text-amber-700 underline font-semibold"
                     >
                       Google AI Studio
-                    </a>.
+                    </a>. Muốn xóa bớt key, bấm biểu tượng thùng rác ở danh sách bên dưới.
                   </p>
                 </div>
 
