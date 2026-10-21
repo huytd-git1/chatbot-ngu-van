@@ -1,9 +1,9 @@
 # BÁO CÁO CƠ CHẾ PHÂN LOẠI TÀI LIỆU VÀ KIỂM CHỨNG TRÍCH DẪN CHO CHATBOT RAG “CÔ DƯƠNG DẠY VĂN DỄ THƯƠNG”
 
 > [!IMPORTANT]
-> **Trạng thái hệ thống: ĐÃ HOÀN THIỆN, TÍCH HỢP & PASS 30/30 UNIT TESTS**  
+> **Trạng thái hệ thống: ĐÃ HOÀN THIỆN, TÍCH HỢP & PASS 41/41 UNIT TESTS**  
 > Dự án: **Chatbot RAG Ngữ văn “Cô Dương dạy văn dễ thương”**  
-> Ngày cập nhật: **18/10/2026**  
+> Ngày cập nhật: **21/10/2026** • *made by huytd*  
 > Tài liệu liên quan: [`docs/DOCUMENT_CLASSIFICATION_AND_VERIFICATION_GUIDE.md`](file:///d:/Project/chatbot-ngu-van/docs/DOCUMENT_CLASSIFICATION_AND_VERIFICATION_GUIDE.md)  
 
 ---

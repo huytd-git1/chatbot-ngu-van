@@ -1,28 +1,33 @@
 # Cô Dương dạy văn dễ thương - Chatbot RAG Ngữ Văn
+**Tác giả**: made by huytd  
+**Phiên bản**: Tháng 10/2026
 
-> **Hệ thống Chatbot RAG hỗ trợ học tập Ngữ văn THCS & THPT** sử dụng mô hình Google Gemini chính thức qua cơ chế **Gemini File Search**, bảo đảm 100% câu trả lời có trích dẫn nguồn thực tế từ tài liệu giáo viên cung cấp, từ chối trả lời bịa đặt khi thiếu căn cứ và bảo vệ quyền riêng tư của học sinh.
+> **Hệ thống Chatbot RAG hỗ trợ học tập Ngữ văn THCS & THPT** sử dụng đa cổng mô hình AI: **Google Gemini chính thức (Gemini File Search)** và **Cổng Bên Thứ Ba (Third-Party Gateway: RevidAPI, RouteAPI, OpenRouter)** kết hợp cùng bộ phân đoạn văn bản ngữ nghĩa (`ParagraphService`). Bảo đảm 100% câu trả lời có trích dẫn nguồn thực tế từ tài liệu giáo viên cung cấp, từ chối trả lời bịa đặt khi thiếu căn cứ và bảo vệ quyền riêng tư của học sinh.
 
 ---
 
 ## Bảng mục lục hướng dẫn
 1. [Cài đặt và chạy Local (Nhanh nhất)](#1-cài-đặt-và-chạy-local)
-2. [Cấu hình Google Gemini & File Search](#2-cấu-hình-google-gemini--file-search)
-3. [Kết nối cơ sở dữ liệu PostgreSQL](#3-kết-nối-cơ-sở-dữ-liệu-postgresql)
-4. [Tạo tài khoản Quản trị viên, Giáo viên và Giáo viên Test](#4-tạo-tài-khoản-quản-trị-viên-giáo-viên-và-giáo-viên-test)
-5. [Nhập danh sách học sinh (Giao diện & File mẫu CSV)](#5-nhập-danh-sách-học-sinh)
-6. [Tải và quản lý tài liệu RAG](#6-tải-và-quản-lý-tài-liệu-rag)
-7. [Quy trình kiểm tra RAG với tài liệu kiểm soát](#7-quy-trình-kiểm-tra-rag-với-tài-liệu-kiểm-soát)
-8. [Đưa mã nguồn lên GitHub](#8-đưa-mã-nguồn-lên-github)
-9. [Triển khai trực tuyến lên Render (Hosting miễn phí)](#9-triển-khai-trực-tuyến-lên-render)
-10. [Giới hạn gói miễn phí & Chi phí tiềm năng](#10-giới-hạn-gói-miễn-phí--chi-phí-tiềm-năng)
-11. [Sao lưu và khôi phục dữ liệu (Backup / Restore)](#11-sao-lưu-và-khôi-phục-dữ-liệu)
-12. [Xử lý sự cố thường gặp & Đổi khóa bí mật (Secrets Rotation)](#12-xử-lý-sự-cố--đổi-khóa-bí-mật)
+2. [Cấu hình AI: Google Gemini & Cổng Bên Thứ Ba](#2-cấu-hình-ai-google-gemini--cổng-bên-thứ-ba)
+3. [Dàn Multi-Key Pool & Cơ chế Bảo toàn Key (Key Merging)](#3-dàn-multi-key-pool--cơ-chế-bảo-toàn-key-key-merging)
+4. [Kết nối cơ sở dữ liệu PostgreSQL](#4-kết-nối-cơ-sở-dữ-liệu-postgresql)
+5. [Tạo tài khoản Quản trị viên, Giáo viên và Giáo viên Test](#5-tạo-tài-khoản-quản-trị-viên-giáo-viên-và-giáo-viên-test)
+6. [Nhập danh sách học sinh (Giao diện & File mẫu CSV)](#6-nhập-danh-sách-học-sinh)
+7. [Tải và quản lý tài liệu RAG (.txt / .md & Tải lại tài liệu)](#7-tải-và-quản-lý-tài-liệu-rag)
+8. [Phân đoạn Ngữ văn chuyên biệt & Kiểm chứng trích dẫn nguyên văn](#8-phân-đoạn-ngữ-văn-chuyên-biệt--kiểm-chứng-trích-dẫn-nguyên-văn)
+9. [Quy trình kiểm tra RAG với tài liệu kiểm soát](#9-quy-trình-kiểm-tra-rag-với-tài-liệu-kiểm-soát)
+10. [Gợi ý câu hỏi đào sâu thông minh từ trích dẫn bài học](#10-gợi-ý-câu-hỏi-đào-sâu-thông-minh-từ-trích-dẫn-bài-học)
+11. [Đưa mã nguồn lên GitHub](#11-đưa-mã-nguồn-lên-github)
+12. [Triển khai trực tuyến lên Render (Hosting miễn phí)](#12-triển-khai-trực-tuyến-lên-render)
+13. [Giới hạn gói miễn phí & Chi phí tiềm năng](#13-giới-hạn-gói-miễn-phí--chi-phí-tiềm-năng)
+14. [Sao lưu và khôi phục dữ liệu (Backup / Restore)](#14-sao-lưu-và-khôi-phục-dữ-liệu)
+15. [Xử lý sự cố thường gặp & Đổi khóa bí mật (Secrets Rotation)](#15-xử-lý-sự-cố--đổi-khóa-bí-mật)
 
 ---
 
 ## 1. Cài đặt và chạy Local
 
-Hệ thống được thiết kế theo mô hình **Monorepo** với chế độ tự động chạy giả lập bộ nhớ (`DATABASE_URL=memory`) và Mock RAG khi chưa có khóa Gemini API, giúp bạn chạy thử nghiệm toàn bộ hệ thống ngay trên máy tính mà không cần cài đặt thêm phần mềm cơ sở dữ liệu phức tạp.
+Hệ thống được thiết kế theo mô hình **Monorepo** với chế độ tự động chạy giả lập bộ nhớ (`DATABASE_URL=memory`) và Mock RAG khi chưa có khóa Gemini API hay token bên thứ ba, giúp bạn chạy thử nghiệm toàn bộ hệ thống ngay trên máy tính mà không cần cài đặt thêm phần mềm cơ sở dữ liệu phức tạp.
 
 ### Yêu cầu tiên quyết:
 - Đã cài đặt **Node.js** (Phiên bản v20.x hoặc v22.x LTS trở lên).
@@ -71,27 +76,45 @@ Truy cập giao diện tại: **`http://localhost:5173`**.
 
 ---
 
-## 2. Cấu hình Google Gemini & File Search
+## 2. Cấu hình AI: Google Gemini & Cổng Bên Thứ Ba
 
-Để chuyển từ chế độ giả lập cục bộ sang gọi trực tiếp **Google Gemini API** và sử dụng tính năng **Gemini File Search**:
+Hệ thống hỗ trợ 2 nguồn cung cấp mô hình AI linh hoạt, có thể chuyển đổi dễ dàng trong trang Quản trị viên (`/admin`):
 
+### Nhánh 1: Google Gemini Chính Thống (AI Studio)
 1. Truy cập [Google AI Studio](https://aistudio.google.com/app/apikey) và đăng nhập bằng tài khoản Google.
-2. Nhấn nút **Create API Key** để tạo một khóa API mới.
-3. Mở file `.env` trong thư mục dự án và dán khóa API vào:
+2. Nhấn nút **Create API Key** để tạo khóa API.
+3. Nhập khóa API vào trang Quản trị viên hoặc file `.env`:
    ```env
    GEMINI_API_KEY=AIzaSyD...dien_khoa_cua_ban_o_day...
-   GEMINI_MODEL=gemini-3.8-flash
+   GEMINI_MODEL=gemini-2.5-flash
    ```
-4. **Cơ chế hoạt động:**
-   - Khi có `GEMINI_API_KEY`, ứng dụng tự động kết nối qua thư viện SDK chính thức `@google/genai`.
-   - Mỗi tác phẩm khi được tạo sẽ có một **File Search Store** độc lập trên Google Cloud.
-   - Tài liệu giáo viên tải lên (`.pdf`, `.txt`, `.docx`, `.md`) sẽ được tải lên Google File API và gắn vào Store tương ứng.
-   - Khi học sinh đặt câu hỏi, backend chỉ chỉ định Store thuộc tác phẩm mà lớp của học sinh được phân quyền (`file_search_store_names`).
-   - Kết quả phản hồi của Gemini chứa trích dẫn grounding (`file_citation`), backend kiểm tra và bóc tách đoạn trích dẫn thực tế để hiển thị minh bạch cho học sinh.
+4. **Cơ chế hoạt động:** Kết nối qua thư viện SDK chính thức `@google/genai`, sử dụng Gemini File Search Store băm vector trên Google Cloud (`gemini-embedding-2`).
+
+### Nhánh 2: Cổng Bên Thứ Ba (Third-Party Gateway)
+Hỗ trợ bất kỳ cổng OpenAI-compatible nào:
+- **RevidAPI**: `https://revidapi.com/v1` (Khuyên dùng: `gemini-3.6-flash`, `deepseek-v4-flash`, `gpt-4o-mini`).
+- **RouteAPI**: `https://api.routeapi.ai/v1`.
+- **OpenRouter**: `https://openrouter.ai/api/v1`.
+- **Custom Gateway**: Cổng tự dựng hoặc proxy riêng của trường học.
+
+**Tính năng thông minh của Cổng Bên Thứ Ba:**
+- Tự động chuẩn hóa định dạng model (`gemini-3.6-flash` <-> `google/gemini-3.6-flash`).
+- Bắt lỗi phân quyền token `HTTP 403 / 400: This token has no access to model...` để tự động chuyển sang model ứng viên tương thích.
+- Hiển thị chính xác tên mô hình đang dùng trong câu trả lời của AI (`✦ deepseek-v4-flash`, `✦ gemini-3.6-flash`).
 
 ---
 
-## 3. Kết nối cơ sở dữ liệu PostgreSQL
+## 3. Dàn Multi-Key Pool & Cơ chế Bảo toàn Key (Key Merging)
+
+Để triệt tiêu lỗi **429 (Hết hạn mức Quota)** và **503 (Máy chủ quá tải)**:
+- **Dàn nhiều Key / Token**: Hỗ trợ nạp hàng chục key/token cho cả Google Gemini và Bên thứ ba.
+- **Round-Robin Load Balancing**: Luân phiên phân bổ tải đều cho các key.
+- **Tự động Cooldown 60s**: Khi một key bị lỗi hạn mức, hệ thống tự động cách ly 60 giây và chuyển sang key dự phòng tiếp theo ngay lập tức mà học sinh không bị gián đoạn.
+- **Bảo toàn dàn Key (Key Merging)**: Khi dán thêm key mới vào hệ thống, các key mới sẽ tự động được bổ sung vào pool hiện có mà **không ghi đè hay xóa các key cũ**. Người quản trị vẫn có thể chủ động bấm xóa từng key theo nhu cầu.
+
+---
+
+## 4. Kết nối cơ sở dữ liệu PostgreSQL
 
 Khi đưa lên môi trường thực tế (Staging hoặc Production), bạn cần kết nối cơ sở dữ liệu PostgreSQL bền vững.
 
@@ -111,18 +134,18 @@ Khi đưa lên môi trường thực tế (Staging hoặc Production), bạn c�
 
 ---
 
-## 4. Tạo tài khoản Quản trị viên, Giáo viên và Giáo viên Test
+## 5. Tạo tài khoản Quản trị viên, Giáo viên và Giáo viên Test
 
 Để bảo mật tuyệt đối, hệ thống **không cho phép tự do đăng ký** tài khoản Quản trị viên hay Giáo viên từ giao diện web bên ngoài.
 
 ### Tài khoản mẫu có sẵn sau khi chạy `npm run seed`:
-- **Quản trị viên (Admin):**
+- **Quản trị viên (Admin - Miễn hạn mức):**
   - Tài khoản: `admin`
   - Mật khẩu: `Admin@2026!`
 - **Giáo viên chuẩn (Teacher):**
   - Tài khoản: `gv_duong`
   - Mật khẩu: `GiaoVien@2026!`
-- **Giáo viên Test (Miễn giới hạn lượt hỏi ngày):**
+- **Giáo viên Test (Miễn hạn mức):**
   - Tài khoản: `gv_test`
   - Mật khẩu: `GiaoVienTest@2026!`
 - **Học sinh mẫu:**
@@ -141,7 +164,7 @@ npm run create-test-teacher --prefix backend gv_kiemthu MatKhauTest@123 "Cô Dư
 
 ---
 
-## 5. Nhập danh sách học sinh
+## 6. Nhập danh sách học sinh
 
 Giáo viên có thể nhập từng học sinh hoặc nhập hàng loạt cả lớp bằng tệp CSV trên trang Giáo viên (`/teacher` -> Tab **Nhập CSV học sinh**):
 
@@ -159,23 +182,33 @@ Giáo viên có thể nhập từng học sinh hoặc nhập hàng loạt cả l
 
 ---
 
-## 6. Tải và quản lý tài liệu RAG
+## 7. Tải và quản lý tài liệu RAG
 
-1. Đăng nhập với tài khoản Giáo viên và chọn tab **Tác phẩm & Tài liệu**.
+1. Đăng nhập với tài khoản Giáo viên/Admin và chọn mục **Tác phẩm & Tài liệu**.
 2. Chọn tác phẩm (ví dụ: *Lặng lẽ Sa Pa* - Nguyễn Thành Long).
-3. Giáo viên chọn loại tài liệu:
-   - **Văn bản tác phẩm** (Đoạn trích nguyên văn).
-   - **Phân tích** (Bài phân tích nghệ thuật, nhân vật).
-   - **Giáo án** (Kế hoạch bài dạy trọng tâm).
-   - **Câu hỏi & Hướng dẫn trả lời** (Hệ thống câu hỏi đọc hiểu).
-4. Tải file lên (`.txt`, `.pdf`, `.docx`, `.md`). Hệ thống kiểm tra dung lượng tối đa 20MB.
-5. Tiến trình lập chỉ mục được lưu trong bảng `indexing_jobs`. Khi trạng thái chuyển sang **Sẵn sàng (ready)**, tài liệu sẽ chính thức có hiệu lực trong các câu hỏi của học sinh.
+3. **Quy định định dạng tệp:** Hệ thống bắt buộc tệp chuẩn định dạng `.txt` hoặc `.md` UTF-8 thuần khiết. Loại bỏ triệt để rác định dạng và lỗi OCR từ các tệp PDF/Word scan.
+4. Chọn vai trò tài liệu:
+   - **Đề xuất văn bản tác phẩm gốc** (duy nhất 1 bản active).
+   - **Tài liệu tham khảo / Phân tích** (phân tích chuyên sâu, giáo án, bối cảnh lịch sử).
+   - **Chưa phân loại** (chờ duyệt, không đưa vào RAG).
+5. **Nút "Tải lại tài liệu" (Reload / Re-index):** Khi giáo viên cập nhật nội dung văn bản, chỉ cần nhấn nút tải lại để hệ thống tự động băm lại đoạn và đồng bộ chỉ mục tức thì.
 
 ---
 
-## 7. Quy trình kiểm tra RAG với tài liệu kiểm soát
+## 8. Phân đoạn Ngữ văn chuyên biệt & Kiểm chứng trích dẫn nguyên văn
 
-Để chứng minh ứng dụng thực sự thực hiện RAG 2 bước và không bịa đặt nguồn, hãy thực hiện kiểm thử thực tế với **Tài liệu kiểm soát bí mật** được nạp sẵn trong hệ thống:
+Khác với các hệ thống RAG thông thường băm cố định 500 token làm đứt đoạn thơ hay câu văn, hệ thống sử dụng **Semantic & Structural Paragraph Chunker** (`ParagraphService`):
+- **Bảo toàn đoạn thơ và câu văn**: Tách đoạn dựa trên ranh giới ngữ nghĩa tự nhiên (`\n\n`).
+- **Tự động nhận diện phân trang**: Nhận diện các mốc `[Trang X]`, `--- Trang X ---` trong giáo án để ghi nhận chính xác số trang tra cứu sách giáo khoa.
+- **Chuẩn hóa Unicode NFC**: Triệt tiêu lỗi sai lệch giữa Unicode dựng sẵn và tổ hợp tiếng Việt.
+- **Kiểm chứng nguyên tác (Code-level Quote Verification)**: Mọi câu trích dẫn `> "..."` được kiểm tra so khớp nguyên văn với bản gốc. Trích dẫn giả mạo hoặc trích dẫn từ tài liệu tham khảo nhưng mạo danh nguyên tác sẽ bị loại bỏ ngay lập tức.
+- Chi tiết xem tại: [`docs/CHUNKER_REPORT.md`](file:///d:/Project/chatbot-ngu-van/docs/CHUNKER_REPORT.md).
+
+---
+
+## 9. Quy trình kiểm tra RAG với tài liệu kiểm soát
+
+Để chứng minh ứng dụng thực sự thực hiện RAG có căn cứ và không bịa đặt nguồn, hãy thực hiện kiểm thử thực tế với **Tài liệu kiểm soát bí mật** được nạp sẵn trong hệ thống:
 
 ### Tài liệu đối chứng đặc biệt trong tác phẩm "Lặng lẽ Sa Pa":
 > *"Trong ngăn kéo bàn làm việc của anh thanh niên có một chiếc la bàn vỏ đồng mang mật mã lưu trữ MÃ-CÔ-DƯƠNG-SAPA-2026."*
@@ -195,7 +228,15 @@ Giáo viên có thể nhập từng học sinh hoặc nhập hàng loạt cả l
 
 ---
 
-## 8. Đưa mã nguồn lên GitHub
+## 10. Gợi ý câu hỏi đào sâu thông minh từ trích dẫn bài học
+
+- Tự động phân tích các trích dẫn (citations) và nội dung vừa trả lời để tạo ra 2 - 3 gợi ý đào sâu thiết thực.
+- **Không tốn thêm bất kỳ lượt gọi API AI nào**: Giảm 100% chi phí token cho tính năng gợi ý.
+- **Khắc phục triệt để lỗi gợi ý lệch tác phẩm**: Đang hỏi về nhân vật của bài nào thì gợi ý sẽ gắn liền với văn bản bài đó (ví dụ: đang hỏi Chí Phèo tuyệt đối không gợi ý về Lặng lẽ Sa Pa).
+
+---
+
+## 11. Đưa mã nguồn lên GitHub
 
 1. Khởi tạo kho lưu trữ Git cục bộ:
    ```bash
@@ -216,7 +257,7 @@ Giáo viên có thể nhập từng học sinh hoặc nhập hàng loạt cả l
 
 ---
 
-## 9. Triển khai trực tuyến lên Render
+## 12. Triển khai trực tuyến lên Render
 
 Dự án đã có sẵn tệp cấu hình **`render.yaml`** (Infrastructure as Code) giúp triển khai chỉ với vài cú nhấp chuột:
 
@@ -227,35 +268,34 @@ Dự án đã có sẵn tệp cấu hình **`render.yaml`** (Infrastructure as C
    - 01 Web Service chạy Node.js (tự động build frontend và backend).
    - 01 Database PostgreSQL miễn phí được liên kết sẵn.
 5. Tại trang cấu hình Environment Variables trên Render, nhập giá trị bí mật:
-   - `GEMINI_API_KEY`: Dán khóa Gemini API thật lấy từ Google AI Studio.
-6. Nhấn **Apply**. Sau khoảng 3-5 phút, ứng dụng của bạn sẽ hoạt động trực tiếp tại địa chỉ URL do Render cấp phát (ví dụ: `https://co-duong-day-van.onrender.com`).
+   - `GEMINI_API_KEY`: Dán khóa Gemini API thật lấy từ Google AI Studio (hoặc cấu hình Cổng bên thứ ba qua giao diện Admin sau khi web khởi động).
+6. Nhấn **Apply**. Sau khoảng 3-5 phút, ứng dụng của bạn sẽ hoạt động trực tiếp tại địa chỉ URL do Render cấp phát.
 
 ---
 
-## 10. Giới hạn gói miễn phí & Chi phí tiềm năng
+## 13. Giới hạn gói miễn phí & Chi phí tiềm năng
 
 ### 1. Dịch vụ lưu trữ Render Free Tier:
 - **Ngủ đông (Spin down):** Sau 15 phút không có người dùng truy cập, Web Service gói miễn phí của Render sẽ tạm dừng. Lần truy cập tiếp theo sẽ mất khoảng 30-50 giây để khởi động lại máy chủ (Cold Start).
 - **Cơ sở dữ liệu Render Postgres Free:** Hết hạn sau 30 ngày dùng thử trên gói Free của Render. Khi chuyển sang sử dụng chính thức lâu dài, nên chuyển sang gói **PostgreSQL Starter** ($7/tháng) hoặc sử dụng cơ sở dữ liệu miễn phí vĩnh viễn không bị xóa của **Neon.tech** hay **Supabase**.
 
-### 2. Chi phí Google Gemini API:
-- **Gói Miễn phí (Free Tier):**
-  - Giới hạn: 15 yêu cầu/phút (RPM), tối đa 1 triệu token/phút (TPM) và 1,500 yêu cầu/ngày (RPD).
-  - Hoàn toàn đủ cho 1 đến 2 lớp học (khoảng 60-100 học sinh) sử dụng hàng ngày mà không mất phí.
-- **Gói Trả theo dung lượng (Pay-as-you-go):**
-  - Chi phí mô hình `gemini-3.8-flash`: Khoảng $0.075 / 1 triệu token đầu vào và $0.30 / 1 triệu token đầu ra.
-  - Trung bình mỗi câu hỏi học sinh tốn chưa tới **50 - 100 đồng VNĐ**.
-  - Ứng dụng đã tích hợp sẵn **Trần an toàn toàn hệ thống (`system_hard_cap`)** và **Công tắc ngắt khẩn cấp (Kill-switch)** tại trang Quản trị viên để ngăn chặn tình trạng vượt ngân sách ngoài ý muốn.
+### 2. Chi phí AI API:
+- **Google Gemini API Free Tier:**
+  - 15 yêu cầu/phút (RPM), tối đa 1 triệu token/phút (TPM) và 1,500 yêu cầu/ngày (RPD) hoàn toàn miễn phí.
+  - Phù hợp cho 1 - 2 lớp học (khoảng 60-100 học sinh) sử dụng hàng ngày.
+- **Cổng Bên Thứ Ba (Pay-as-you-go):**
+  - RevidAPI / RouteAPI: Các model `gemini-3.6-flash`, `deepseek-v4-flash`, `gpt-4o-mini` có giá siêu tiết kiệm (~$0.05 - $0.15 / triệu token).
+  - Trung bình mỗi câu hỏi học sinh tốn chưa tới **20 - 50 đồng VNĐ**.
+  - Tích hợp sẵn **Trần an toàn toàn hệ thống (`system_hard_cap`)** và **Công tắc ngắt khẩn cấp (Kill-switch)** tại trang Quản trị viên để bảo đảm kiểm soát ngân sách.
 
 ---
 
-## 11. Sao lưu và khôi phục dữ liệu
+## 14. Sao lưu và khôi phục dữ liệu
 
 Khi sử dụng PostgreSQL thật, hãy thực hiện sao lưu định kỳ qua terminal:
 
 ### Sao lưu (Backup):
 ```bash
-# Thay thế chuỗi kết nối thực tế của bạn
 pg_dump "postgresql://user:pass@host:5432/dbname" -Fc -f coduong_backup_$(date +%Y%m%d).dump
 ```
 
@@ -266,7 +306,7 @@ pg_restore -d "postgresql://user:pass@host:5432/dbname" --clean --no-owner coduo
 
 ---
 
-## 12. Xử lý sự cố & Đổi khóa bí mật
+## 15. Xử lý sự cố & Đổi khóa bí mật
 
 ### 1. Tài khoản bị khóa do nhập sai mật khẩu 5 lần:
 - Hệ thống tự động khóa an toàn trong 15 phút.
@@ -278,25 +318,28 @@ pg_restore -d "postgresql://user:pass@host:5432/dbname" --clean --no-owner coduo
 
 ### 3. Đổi khóa bí mật (Secrets Rotation):
 - **Khi lộ `SESSION_SECRET`:** Cập nhật biến `SESSION_SECRET` mới trong `.env` hoặc trên Render Dashboard. Toàn bộ phiên cũ sẽ lập tức bị hủy bỏ, buộc tất cả người dùng đăng nhập lại an toàn.
-- **Khi cần thay `GEMINI_API_KEY`:** Cập nhật khóa mới trong `.env`. Máy chủ tự động nhận khóa mới mà không làm mất dữ liệu học sinh trong cơ sở dữ liệu PostgreSQL.
+- **Khi cần thay hoặc thêm API Key:** Nạp trực tiếp trên trang Quản trị viên. Hệ thống tự động gộp vào dàn key mà không làm mất các key cũ.
 
 ---
 
-## 13. Cơ chế Grounding & Trích dẫn Tài liệu RAG
+## 16. Kiểm thử tự động (Unit & Integration Tests)
 
-Hệ thống triển khai cơ chế Grounding trực tiếp từ tài liệu giáo viên đã phê duyệt thông qua Gemini File Search Tool / Vector Store với System Instruction chuẩn mực Sư phạm Ngữ văn:
-- **Nguyên tắc Sư phạm:** AI không bịa đặt nguồn, không trích dẫn sai văn bản gốc, bắt buộc từ chối khi không có tài liệu được cấp phép.
-- **Trích dẫn dẫn chứng trực quan:** Dẫn chứng văn học được đặt trong khối trích dẫn `> "..."` kèm xuất xứ tài liệu, hiển thị danh mục căn cứ rõ ràng trên giao diện học sinh.
-- **Tối ưu hiệu năng:** Trả lời trực tiếp từ kết quả RAG, không thực hiện các vòng lặp kiểm chứng trùng lặp gây nghẽn 503 và đảm bảo thời gian phản hồi nhanh nhất.
-
-### Chạy kiểm thử tự động:
+Chạy bộ kiểm thử tự động toàn diện:
 ```bash
-# Chạy toàn bộ 20 unit & RAG grounding test cases
 npm test
 ```
-
+Toàn bộ **41/41 bài kiểm thử tự động** trên 7 test suites đều đạt 100% PASS:
+- `auth.test.ts` (4 tests)
+- `csv_import.test.ts` (3 tests)
+- `quota.test.ts` (6 tests)
+- `key_pool.test.ts` (6 tests)
+- `third_party_gateway.test.ts` (6 tests)
+- `document_classification_and_verification.test.ts` (10 tests)
+- `rag_grounding.test.ts` (6 tests)
 
 ---
 
-*Hệ thống được phát triển với tinh thần giáo dục tận tâm, nghiêm túc và bảo mật cao.*
-
+## Chân trang nhận diện
+```
+Cô Dương dạy văn dễ thương © 2026 • made by huytd
+```

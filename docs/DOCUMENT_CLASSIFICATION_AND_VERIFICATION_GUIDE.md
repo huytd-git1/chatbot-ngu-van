@@ -1,5 +1,6 @@
 # Hướng dẫn Vận hành Phân loại Tài liệu & Kiểm chứng Trích dẫn
 ### Dự án: Chatbot RAG “Cô Dương dạy văn dễ thương”
+**Tác giả**: made by huytd
 
 ---
 
@@ -35,7 +36,8 @@ Hệ thống bổ sung cơ chế **phân loại tài liệu đa tầng** và **k
      - `Tài liệu tham khảo / Phân tích`: chọn phân loại con (*Phân tích chuyên sâu*, *Giáo án giảng dạy*, *Bối cảnh lịch sử*, *Câu hỏi & đáp*, *Khác*).
      - `Đề xuất văn bản tác phẩm gốc (chờ duyệt)`: tải văn bản gốc mới (sẽ ở trạng thái chờ duyệt trước khi kích hoạt).
      - `Chưa phân loại`: tải tệp lên để duyệt sau.
-   - Chọn tệp văn bản (`.txt`, `.docx`, `.pdf`, `.md`) và nhấn **Tải lên & Lưu kho**.
+   - Chọn tệp văn bản chuẩn UTF-8 định dạng `.txt` hoặc `.md` (bắt buộc `.txt` hoặc `.md` nhằm đảm bảo dữ liệu sạch, không rác OCR hay định dạng lỗi từ PDF/DOCX scan) và nhấn **Tải lên & Lưu kho**.
+   - Nếu cần cập nhật lại chỉ mục hoặc làm mới nội dung tài liệu, giáo viên có thể nhấn nút **"Tải lại tài liệu"** (Reload / Re-index) ngay cạnh tài liệu trong danh sách.
 
 ### Bước 2: Kích hoạt bản gốc có hiệu lực (Atomic Switch)
 1. Trong danh sách tài liệu, tìm tài liệu văn bản gốc bạn muốn sử dụng.
@@ -89,12 +91,12 @@ Khi học sinh đặt câu hỏi:
 |---|---|
 | `backend/src/db/migrate.ts` | Thêm cột `document_role`, `reference_type`, `is_active`, `ocr_status`, `reviewed_by`, `reviewed_at`. Thêm partial unique index `idx_unique_active_primary_per_work`. Tạo bảng `work_paragraphs`. |
 | `backend/src/services/paragraph.service.ts` | Service tách đoạn, phát hiện số trang `[Trang X]`, lưu trữ đoạn gốc & đoạn chuẩn hóa, engine so khớp `verifyQuote` (hỗ trợ `[...]`, giữ nguyên dấu tiếng Việt), `generateDocumentDiffReport`. |
-| `backend/src/services/document.service.ts` | Bổ sung phân loại khi upload, atomic transaction `activatePrimaryDocument`, `updateDocumentClassification`. |
-| `backend/src/services/gemini.service.ts` | Dual-source grounding prompt, backend blockquote verification & strip unverified quotes, mock file search grounded in primary paragraphs. |
-| `backend/src/controllers/teacher.controller.ts` | Endpoints kích hoạt bản gốc, đổi phân loại, xem paragraphs, xem báo cáo diff. |
+| `backend/src/services/document.service.ts` | Bổ sung phân loại khi upload, atomic transaction `activatePrimaryDocument`, `updateDocumentClassification`, nạp lại tài liệu `reloadDocument`. |
+| `backend/src/services/gemini.service.ts` | Dual-source grounding prompt, backend blockquote verification & strip unverified quotes, mock file search grounded in primary paragraphs, gợi ý câu hỏi thông minh từ trích dẫn. |
+| `backend/src/controllers/teacher.controller.ts` | Endpoints kích hoạt bản gốc, đổi phân loại, xem paragraphs, xem báo cáo diff, reload document. |
 | `backend/src/controllers/student.controller.ts` | Kiểm tra bắt buộc có bản gốc active, lọc bỏ tài liệu unclassified, trả về `primaryCitations` và `referenceCitations`. |
 | `backend/src/db/seed.ts` | Seed dữ liệu mẫu văn bản gốc có đánh dấu trang `[Trang 1..3]` và tài liệu phân tích cho tác phẩm *Lặng lẽ Sa Pa*. |
-| `backend/src/__tests__/document_classification_and_verification.test.ts` | 8 unit tests kiểm tra toàn diện: ràng buộc 1 bản gốc DB, trích xuất đoạn, so khớp trích dẫn, từ chối câu trích từ tham khảo, báo cáo diff, RAG dual citations. |
+| `backend/src/__tests__/document_classification_and_verification.test.ts` | 10 unit tests kiểm tra toàn diện: ràng buộc 1 bản gốc DB, trích xuất đoạn, so khớp trích dẫn, từ chối câu trích từ tham khảo, báo cáo diff, RAG dual citations. |
 | `frontend/src/types.ts` | Bổ sung các interface: `DocumentItem` cập nhật, `PrimaryCitation`, `ReferenceCitation`, `ParagraphItem`, `DocumentDiffReport`, `DocumentDiffItem`. |
-| `frontend/src/components/TeacherDashboard.tsx` | Giao diện quản lý 3 nhóm tài liệu (Bản gốc, Tham khảo, Chưa phân loại), cảnh báo thiếu bản gốc, modal xem trước đoạn trích xuất (OCR & Trang), modal Báo cáo đối chiếu tài liệu. |
+| `frontend/src/components/TeacherDashboard.tsx` | Giao diện quản lý 3 nhóm tài liệu (Bản gốc, Tham khảo, Chưa phân loại), cảnh báo thiếu bản gốc, nút tải lại tài liệu, modal xem trước đoạn trích xuất (OCR & Trang), modal Báo cáo đối chiếu tài liệu. |
 | `frontend/src/components/StudentChat.tsx` | Giao diện hiển thị phân tách 2 nhóm nguồn dưới câu trả lời của AI: Dẫn chứng từ tác phẩm gốc (`✓ Đã đối chiếu nguyên tác`, số trang, xem ngữ cảnh đoạn) và Nguồn hỗ trợ phân tích. |
