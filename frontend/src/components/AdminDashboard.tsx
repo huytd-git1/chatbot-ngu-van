@@ -1076,7 +1076,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* TAB 2: AI & GEMINI CONFIGURATION */}
       {activeTab === 'ai' && (
-        <div className="max-w-3xl bg-white p-6 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-6">
+        <div className="max-w-5xl lg:max-w-6xl w-full bg-white p-6 sm:p-7 rounded-2xl border border-[#e8e2d5] shadow-2xs space-y-6">
           <div className="flex items-start justify-between">
             <div>
               <h3 className="text-base font-bold text-[#0f2942] flex items-center gap-2">
@@ -1377,7 +1377,7 @@ export const AdminDashboard: React.FC = () => {
                         {customKeyPool.map((k) => (
                           <div
                             key={k.index}
-                            className="p-3.5 rounded-2xl bg-white/95 border border-indigo-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-indigo-300 hover:shadow-xs"
+                            className="p-3.5 rounded-2xl bg-white/95 border border-indigo-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-indigo-300 hover:shadow-xs min-w-0 overflow-hidden"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 min-w-0">
@@ -1410,7 +1410,7 @@ export const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Per-Key Model Selector */}
-                            <div className="flex items-center gap-1.5 bg-indigo-50/80 rounded-xl px-2.5 py-1.5 border border-indigo-100/90 text-[11px]">
+                            <div className="flex items-center gap-1.5 bg-indigo-50/80 rounded-xl px-2.5 py-1.5 border border-indigo-100/90 text-[11px] min-w-0 w-full overflow-hidden">
                               <Cpu className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                               <span className="text-[10px] font-bold text-indigo-900 shrink-0">Mô hình:</span>
                               <select
@@ -1418,12 +1418,12 @@ export const AdminDashboard: React.FC = () => {
                                 onChange={(e) => handleUpdateKeyModel('third_party', k.index, e.target.value)}
                                 disabled={updatingKeyModel === `third_party_${k.index}`}
                                 title={`Chọn mô hình hoạt động riêng cho Token #${k.index}`}
-                                className="flex-1 bg-white text-indigo-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-indigo-200/90 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
+                                className="flex-1 min-w-0 w-full max-w-full bg-white text-indigo-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-indigo-200/90 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
                               >
                                 <option value={customModelName}>Mục tiêu chung ({customModelName})</option>
                                 {thirdPartyModels.map((tm) => (
                                   <option key={tm.id} value={tm.id}>
-                                    {tm.name} ({tm.id})
+                                    {tm.name && tm.name !== tm.id ? `${tm.name} (${tm.id})` : tm.id}
                                   </option>
                                 ))}
                                 {k.model &&
@@ -1691,7 +1691,7 @@ export const AdminDashboard: React.FC = () => {
                         {keyPool.map((k) => (
                           <div
                             key={k.index}
-                            className="p-3.5 rounded-2xl bg-white/95 border border-emerald-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-emerald-300 hover:shadow-xs"
+                            className="p-3.5 rounded-2xl bg-white/95 border border-emerald-200/90 text-xs shadow-2xs space-y-2.5 transition-all hover:border-emerald-300 hover:shadow-xs min-w-0 overflow-hidden"
                           >
                             {/* Header: Index, Masked Key, Status, Delete */}
                             <div className="flex items-center justify-between gap-2">
@@ -1725,7 +1725,7 @@ export const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Per-Key Model Selector */}
-                            <div className="flex items-center gap-1.5 bg-emerald-50/80 rounded-xl px-2.5 py-1.5 border border-emerald-100/90 text-[11px]">
+                            <div className="flex items-center gap-1.5 bg-emerald-50/80 rounded-xl px-2.5 py-1.5 border border-emerald-100/90 text-[11px] min-w-0 w-full overflow-hidden">
                               <Cpu className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                               <span className="text-[10px] font-bold text-emerald-900 shrink-0">Mô hình:</span>
                               <select
@@ -1733,12 +1733,12 @@ export const AdminDashboard: React.FC = () => {
                                 onChange={(e) => handleUpdateKeyModel('google_official', k.index, e.target.value)}
                                 disabled={updatingKeyModel === `google_official_${k.index}`}
                                 title={`Chọn mô hình hoạt động riêng cho API Key #${k.index}`}
-                                className="flex-1 bg-white text-emerald-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-emerald-200/90 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
+                                className="flex-1 min-w-0 w-full max-w-full bg-white text-emerald-950 font-semibold text-[11px] rounded-lg px-2 py-1 border border-emerald-200/90 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs truncate cursor-pointer disabled:opacity-50"
                               >
-                                <option value={selectedModel}>Mặc định ({selectedModel})</option>
+                                <option value={selectedModel}>Mục tiêu chung ({selectedModel})</option>
                                 {supportedModels.map((sm) => (
                                   <option key={sm.id} value={sm.id}>
-                                    {sm.name} {sm.badge ? `(${sm.badge})` : ''}
+                                    {sm.name && sm.name !== sm.id ? `${sm.name} (${sm.id})` : sm.name || sm.id} {sm.badge ? `[${sm.badge}]` : ''}
                                   </option>
                                 ))}
                                 {k.model &&
