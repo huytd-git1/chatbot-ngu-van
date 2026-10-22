@@ -155,7 +155,8 @@ export class RagEvalController {
           version: doc.version,
           rawContent: doc.raw_content || '',
         },
-        chunks,
+        chunks: chunks || [],
+        sourceContent: doc.raw_content || '',
       });
     } catch (err: any) {
       console.error('[RagEvalController.getDocumentChunks] Error:', err);

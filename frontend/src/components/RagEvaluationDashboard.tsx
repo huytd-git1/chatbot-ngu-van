@@ -90,9 +90,13 @@ export const RagEvaluationDashboard: React.FC = () => {
       const res = await apiRequest<{ works: Work[] }>('/api/teacher/works');
       setWorks(res.works || []);
       if (res.works && res.works.length > 0) {
-        if (!selectedWorkIdForChunks) setSelectedWorkIdForChunks(res.works[0].id);
-        if (!playgroundWorkId) setPlaygroundWorkId(res.works[0].id);
-        if (!tcWorkId) setTcWorkId(res.works[0].id);
+        const firstWorkId = res.works[0].id;
+        if (!selectedWorkIdForChunks) {
+          setSelectedWorkIdForChunks(firstWorkId);
+          loadDocsForWork(firstWorkId);
+        }
+        if (!playgroundWorkId) setPlaygroundWorkId(firstWorkId);
+        if (!tcWorkId) setTcWorkId(firstWorkId);
       }
     } catch {
     } finally {
@@ -121,14 +125,21 @@ export const RagEvaluationDashboard: React.FC = () => {
   const loadDocsForWork = async (wId: string) => {
     try {
       const res = await apiRequest<{ documents: DocumentItem[] }>(`/api/teacher/works/${wId}/documents`);
-      setDocsForChunks(res.documents || []);
-      if (res.documents && res.documents.length > 0) {
-        setSelectedDocIdForChunks(res.documents[0].id);
+      const docs = res.documents || [];
+      setDocsForChunks(docs);
+      if (docs.length > 0) {
+        setSelectedDocIdForChunks(docs[0].id);
+        loadChunks(docs[0].id);
       } else {
         setSelectedDocIdForChunks('');
         setChunksData(null);
       }
-    } catch {}
+    } catch (err: any) {
+      console.warn('[RagEvaluationDashboard] Lỗi tải tài liệu:', err);
+      setDocsForChunks([]);
+      setSelectedDocIdForChunks('');
+      setChunksData(null);
+    }
   };
 
   useEffect(() => {
@@ -543,7 +554,13 @@ export const RagEvaluationDashboard: React.FC = () => {
               <span className="text-xs font-semibold text-slate-700">Tác phẩm:</span>
               <select
                 value={selectedWorkIdForChunks}
-                onChange={(e) => setSelectedWorkIdForChunks(e.target.value)}
+                onChange={(e) => {
+                  const newWId = e.target.value;
+                  setSelectedWorkIdForChunks(newWId);
+                  setSelectedDocIdForChunks('');
+                  setChunksData(null);
+                  loadDocsForWork(newWId);
+                }}
                 className="text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-medium"
               >
                 {works.map((w) => (
@@ -558,14 +575,21 @@ export const RagEvaluationDashboard: React.FC = () => {
               <span className="text-xs font-semibold text-slate-700">Tài liệu:</span>
               <select
                 value={selectedDocIdForChunks}
-                onChange={(e) => setSelectedDocIdForChunks(e.target.value)}
+                onChange={(e) => {
+                  setSelectedDocIdForChunks(e.target.value);
+                  if (e.target.value) loadChunks(e.target.value);
+                }}
                 className="text-xs p-2 rounded-xl border border-[#e8e2d5] bg-[#fbf9f4] font-medium"
               >
-                {docsForChunks.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    [{d.document_role === 'primary' ? 'Bản gốc' : 'Tham khảo'}] {d.title} (v{d.version})
-                  </option>
-                ))}
+                {docsForChunks.length === 0 ? (
+                  <option value="">(Tác phẩm chưa có tài liệu)</option>
+                ) : (
+                  docsForChunks.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      [{d.document_role === 'primary' ? 'Bản gốc' : 'Tham khảo'}] {d.title} (v{d.version})
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -583,91 +607,113 @@ export const RagEvaluationDashboard: React.FC = () => {
           ) : !chunksData ? (
             <div className="py-20 text-center text-xs text-slate-400 italic">Vui lòng chọn tác phẩm và tài liệu để kiểm tra các chunk.</div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Left Column: Source Text with Highlight */}
-              <div className="bg-white p-4 rounded-2xl border border-[#e8e2d5] shadow-2xs flex flex-col h-[650px]">
-                <div className="flex items-center justify-between pb-2 border-b border-[#e8e2d5] mb-2">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-emerald-700" />
-                    <span className="text-xs font-bold text-[#0f2942]">Văn bản nguồn (Tô sáng vị trí chunk đã chọn)</span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {chunksData.sourceContent.length} ký tự
-                  </span>
-                </div>
-                <div className="flex-1 overflow-y-auto text-xs font-serif leading-relaxed p-2 bg-[#fbf9f4] rounded-xl border border-[#e8e2d5] whitespace-pre-wrap select-text">
-                  {(() => {
-                    const selChunk = chunksData.chunks.find((c) => c.id === highlightedChunkId);
-                    if (!selChunk || selChunk.start_offset === undefined || selChunk.end_offset === undefined) {
-                      return chunksData.sourceContent;
-                    }
-                    const before = chunksData.sourceContent.slice(0, selChunk.start_offset);
-                    const highlighted = chunksData.sourceContent.slice(selChunk.start_offset, selChunk.end_offset);
-                    const after = chunksData.sourceContent.slice(selChunk.end_offset);
-                    return (
-                      <>
-                        <span>{before}</span>
-                        <mark className="bg-amber-300 text-amber-950 font-sans font-semibold px-1 py-0.5 rounded shadow-2xs">
-                          {highlighted}
-                        </mark>
-                        <span>{after}</span>
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
+            (() => {
+              const sourceText = chunksData?.sourceContent || chunksData?.document?.rawContent || '';
+              const chunksList = Array.isArray(chunksData?.chunks) ? chunksData.chunks : [];
 
-              {/* Right Column: Chunks List */}
-              <div className="bg-white p-4 rounded-2xl border border-[#e8e2d5] shadow-2xs flex flex-col h-[650px]">
-                <div className="flex items-center justify-between pb-2 border-b border-[#e8e2d5] mb-2">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-blue-700" />
-                    <span className="text-xs font-bold text-[#0f2942]">
-                      Danh sách các Chunk đã cắt ({chunksData.chunks.length} đoạn)
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-500">Bấm vào đoạn để xem vị trí nguồn</span>
-                </div>
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                  {chunksData.chunks.map((c, idx) => {
-                    const isSelected = highlightedChunkId === c.id;
-                    return (
-                      <div
-                        key={c.id || idx}
-                        onClick={() => setHighlightedChunkId(isSelected ? null : c.id)}
-                        className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-amber-50 border-amber-400 shadow-xs ring-2 ring-amber-300'
-                            : 'bg-white hover:bg-slate-50 border-[#e8e2d5]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="font-bold text-[#0f2942] flex items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-700 font-mono">
-                              #{c.chunk_order ?? idx + 1}
-                            </span>
-                            {c.section_title || `Đoạn ${idx + 1}`}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              ~{c.token_estimate} tokens
-                            </span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200">
-                              {c.document_role === 'primary' ? 'Nguyên tác [P]' : 'Tham khảo [R]'}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-slate-700 line-clamp-3 leading-relaxed font-sans">{c.content}</p>
-                        <div className="mt-2 pt-1 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                          <span>Offset: {c.start_offset} - {c.end_offset}</span>
-                          <span>Hash: {c.content_hash ? c.content_hash.slice(0, 8) : 'N/A'}</span>
-                        </div>
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Left Column: Source Text with Highlight */}
+                  <div className="bg-white p-4 rounded-2xl border border-[#e8e2d5] shadow-2xs flex flex-col h-[650px]">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#e8e2d5] mb-2">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-emerald-700" />
+                        <span className="text-xs font-bold text-[#0f2942]">Văn bản nguồn (Tô sáng vị trí chunk đã chọn)</span>
                       </div>
-                    );
-                  })}
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {sourceText.length} ký tự
+                      </span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto text-xs font-serif leading-relaxed p-3 bg-[#fbf9f4] rounded-xl border border-[#e8e2d5] whitespace-pre-wrap select-text">
+                      {(() => {
+                        if (!sourceText) {
+                          return (
+                            <span className="text-slate-400 italic font-sans">
+                              Tài liệu này chưa có nội dung văn bản thô trong cơ sở dữ liệu.
+                            </span>
+                          );
+                        }
+                        const selChunk = chunksList.find((c: any) => c.id === highlightedChunkId);
+                        if (!selChunk || selChunk.start_offset === undefined || selChunk.end_offset === undefined) {
+                          return sourceText;
+                        }
+                        const start = Math.max(0, selChunk.start_offset);
+                        const end = Math.min(sourceText.length, selChunk.end_offset);
+                        const before = sourceText.slice(0, start);
+                        const highlighted = sourceText.slice(start, end);
+                        const after = sourceText.slice(end);
+                        return (
+                          <>
+                            <span>{before}</span>
+                            <mark className="bg-amber-300 text-amber-950 font-sans font-semibold px-1 py-0.5 rounded shadow-2xs">
+                              {highlighted}
+                            </mark>
+                            <span>{after}</span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Chunks List */}
+                  <div className="bg-white p-4 rounded-2xl border border-[#e8e2d5] shadow-2xs flex flex-col h-[650px]">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#e8e2d5] mb-2">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-blue-700" />
+                        <span className="text-xs font-bold text-[#0f2942]">
+                          Danh sách các Chunk đã cắt ({chunksList.length} đoạn)
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500">Bấm vào đoạn để xem vị trí nguồn</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                      {chunksList.length === 0 ? (
+                        <div className="py-12 text-center text-xs text-slate-400 italic">
+                          Chưa có đoạn nào được phân tách cho tài liệu này.
+                        </div>
+                      ) : (
+                        chunksList.map((c: any, idx: number) => {
+                          const isSelected = highlightedChunkId === c.id;
+                          return (
+                            <div
+                              key={c.id || idx}
+                              onClick={() => setHighlightedChunkId(isSelected ? null : c.id)}
+                              className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-amber-50 border-amber-400 shadow-xs ring-2 ring-amber-300'
+                                  : 'bg-white hover:bg-slate-50 border-[#e8e2d5]'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="font-bold text-[#0f2942] flex items-center gap-1.5">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-700 font-mono">
+                                    #{c.chunk_order ?? idx + 1}
+                                  </span>
+                                  {c.section_title || `Đoạn ${idx + 1}`}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    ~{c.token_estimate} tokens
+                                  </span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200">
+                                    {c.document_role === 'primary' ? 'Nguyên tác [P]' : 'Tham khảo [R]'}
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="text-slate-700 line-clamp-3 leading-relaxed font-sans">{c.content}</p>
+                              <div className="mt-2 pt-1 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                                <span>Offset: {c.start_offset} - {c.end_offset}</span>
+                                <span>Hash: {c.content_hash ? c.content_hash.slice(0, 8) : 'N/A'}</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()
           )}
         </div>
       )}
