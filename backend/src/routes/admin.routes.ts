@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/admin.controller.js';
+import { RagEvalController } from '../controllers/rag_eval.controller.js';
 import { authMiddleware, requireRole } from '../middlewares/auth.middleware.js';
 
 export const adminRouter = Router();
@@ -33,3 +34,16 @@ adminRouter.delete('/ai-settings/keys', AdminController.clearAllAiKeys);
 adminRouter.post('/ai-settings/reset-token-stats', AdminController.resetAiTokenStats);
 
 adminRouter.get('/audit-logs', AdminController.getAuditLogs);
+
+// RAG Evaluation & Inspection Dashboard routes
+adminRouter.get('/rag-eval/overview', RagEvalController.getOverview);
+adminRouter.get('/rag-eval/documents/:docId/chunks', RagEvalController.getDocumentChunks);
+adminRouter.post('/rag-eval/playground', RagEvalController.runPlayground);
+adminRouter.get('/rag-eval/traces', RagEvalController.getTraces);
+adminRouter.get('/rag-eval/traces/:id', RagEvalController.getTraceDetail);
+adminRouter.post('/rag-eval/traces/:id/evaluate', RagEvalController.submitEvaluation);
+adminRouter.get('/rag-eval/testsets', RagEvalController.getTestsets);
+adminRouter.post('/rag-eval/testsets', RagEvalController.createTestset);
+adminRouter.post('/rag-eval/testsets/:testsetId/run', RagEvalController.runBenchmark);
+adminRouter.get('/rag-eval/runs', RagEvalController.getRuns);
+

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { TeacherController } from '../controllers/teacher.controller.js';
+import { MetadataController } from '../controllers/metadata.controller.js';
 import { authMiddleware, requireRole } from '../middlewares/auth.middleware.js';
 
 export const teacherRouter = Router();
@@ -45,6 +46,13 @@ teacherRouter.get('/documents/:documentId/download', TeacherController.downloadD
 teacherRouter.put('/documents/:documentId/reupload', upload.single('file'), TeacherController.reuploadDocument);
 teacherRouter.delete('/documents/:documentId', TeacherController.deleteDocument);
 
+// Document Metadata regeneration & preview ("Tạo lại metadata")
+teacherRouter.post('/documents/:id/regenerate-metadata', MetadataController.triggerRegeneration);
+teacherRouter.get('/documents/:id/metadata', MetadataController.getDocumentMetadata);
+teacherRouter.post('/documents/:id/metadata/:metaId/approve', MetadataController.approveMetadata);
+teacherRouter.put('/documents/:id/metadata/:metaId', MetadataController.updateDraftMetadata);
+
 // Learning settings
 teacherRouter.get('/classes/:classId/works/:workId/learning-settings', TeacherController.getLearningSettings);
 teacherRouter.put('/classes/:classId/works/:workId/learning-settings', TeacherController.updateLearningSettings);
+

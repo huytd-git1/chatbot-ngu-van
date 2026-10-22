@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 
 import { query } from '../db/pool.js';
 import { ParagraphRow, ParagraphService } from './paragraph.service.js';
+import { RetrievalService } from './retrieval.service.js';
 
 export interface FileCitationMeta {
   fileName: string;
@@ -39,6 +40,8 @@ export interface RagResult {
   toolActuallyUsed: boolean;
   modelUsed?: string;
   isLiveAi?: boolean;
+  isMock?: boolean;
+  traceId?: string;
 }
 
 export interface SupportedModel {
@@ -2036,6 +2039,7 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
     fileSearchStoreNames?: string[];
     toolActuallyUsed?: boolean;
     initialCitations?: FileCitationMeta[];
+    retrievedChunks?: any[];
   }): RagResult {
     const {
       fullResponseText,
@@ -2046,19 +2050,41 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
       actualModelUsed,
       apiKeyMasked,
       fileSearchStoreNames = [],
-      toolActuallyUsed = true,
+      toolActuallyUsed = false,
       initialCitations = [],
+      retrievedChunks = [],
     } = params;
 
     const primaryParagraphs = primaryDoc ? primaryDoc.paragraphs : [];
     const refSnippets = (referenceDocs || []).map((r) => ({ title: r.title, text: r.rawContent || '' }));
 
     const primaryCitations: PrimaryCitationMeta[] = [];
-    const referenceCitations: ReferenceCitationMeta[] = (referenceDocs || []).map((r) => ({
-      documentTitle: r.title,
-      referenceType: r.referenceType || 'analysis',
-      role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
-    }));
+    
+    // Parse which source codes [Rx] the model actually cited in the text
+    const usedRefCodes = new Set(
+      (fullResponseText.match(/\[R\d+\]/gi) || []).map((c) => c.toUpperCase().replace(/[\[\]]/g, ''))
+    );
+
+    const referenceCitations: ReferenceCitationMeta[] = [];
+    for (const r of referenceDocs || []) {
+      const isCodeUsed = retrievedChunks.some(
+        (c: any) => c.role === 'reference' && c.documentId === r.id && usedRefCodes.has(c.code)
+      );
+      const isTitleMentioned = fullResponseText.toLowerCase().includes(r.title.toLowerCase());
+
+      // Only cite if chunk code [Rx] was referenced, or document title was specifically referenced,
+      // or if no specific [Rx] was emitted but response is substantive and not a refusal
+      const isRefusal = fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ') || 
+                        fullResponseText.toLowerCase().includes('không tìm thấy trong tài liệu');
+
+      if (!isRefusal && (isCodeUsed || isTitleMentioned || (usedRefCodes.size === 0 && referenceDocs.length === 1))) {
+        referenceCitations.push({
+          documentTitle: r.title,
+          referenceType: r.referenceType || 'analysis',
+          role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
+        });
+      }
+    }
 
     let verifiedResponseText = fullResponseText;
     const blockquotes = Array.from(fullResponseText.matchAll(/>\s*["“]([^"”\n]+)["”]/g));
@@ -2162,6 +2188,9 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
   /**
    * Executes RAG Interaction with File Search tool or Third-Party Provider
    */
+  /**
+   * Executes RAG Interaction with File Search tool or Third-Party Provider
+   */
   static async executeRagQuery(params: {
     workTitle: string;
     learningMode: string;
@@ -2184,6 +2213,9 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
       rawContent: string | null;
     }>;
     chatHistory?: Array<{ sender: 'user' | 'ai'; text: string }>;
+    workId?: string;
+    userId?: string;
+    traceSource?: 'student' | 'admin_lab' | 'eval_batch';
   }): Promise<RagResult> {
     const {
       workTitle,
@@ -2196,7 +2228,34 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
       primaryDoc,
       referenceDocs = [],
       chatHistory = [],
+      workId,
+      userId,
+      traceSource = 'student',
     } = params;
+
+    const startTime = Date.now();
+    let retrievedChunks: any[] = [];
+    let tokenBreakdown: any = {};
+    let promptContextText = '';
+    let isLackOfSource = false;
+
+    // Run Pre-Retrieval Service if workId provided
+    if (workId) {
+      try {
+        const retrievalRes = await RetrievalService.retrieveAndBuildPrompt({
+          workId,
+          question: studentQuestion,
+          learningMode,
+          history: chatHistory.map((h) => ({ role: h.sender, content: h.text })),
+        });
+        retrievedChunks = retrievalRes.allSelectedChunks;
+        tokenBreakdown = retrievalRes.tokenBreakdown;
+        promptContextText = retrievalRes.promptContextText;
+        isLackOfSource = retrievalRes.lackOfSource;
+      } catch (retrievalErr) {
+        console.warn('[GeminiService] Pre-retrieval error, continuing with fallback:', retrievalErr);
+      }
+    }
 
     const systemInstruction = this.buildSystemInstruction(learningMode, workTitle, prepReviewSettings);
 
@@ -2215,44 +2274,51 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
           referenceDocs,
           chatHistory,
         });
+        const traceId = await this.recordRagTrace({
+          traceSource,
+          userId,
+          workId,
+          queryText: studentQuestion,
+          learningMode,
+          processingMethod: 'mock',
+          modelName: 'Bên thứ 3 (Chưa cấu hình API Token)',
+          promptTokensEstimated: tokenBreakdown,
+          retrievedChunks,
+          rawOutput: mockRes.text,
+          finalOutput: mockRes.text,
+          latencyMs: Date.now() - startTime,
+          fallbackOccurred: true,
+          lackOfSource: isLackOfSource,
+          isMock: true,
+        });
         return {
           ...mockRes,
           isLiveAi: false,
+          isMock: true,
           modelUsed: 'Bên thứ 3 (Chưa cấu hình API Token)',
+          toolActuallyUsed: false,
+          traceId: traceId || undefined,
         };
       }
 
-      let documentContext = '';
-      if (primaryDoc) {
-        documentContext +=
-          `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC (NGUỒN DUY NHẤT ĐƯỢC PHÉP TRÍCH NGUYÊN VĂN) ===\n` +
-          `Tiêu đề: "${primaryDoc.title}" (Phiên bản: ${primaryDoc.version})\n` +
-          (primaryDoc.rawContent ||
-            primaryDoc.paragraphs
-              .map((p) => `[Đoạn ${p.paragraph_order}${p.page_number ? ` - Trang ${p.page_number}` : ''}]: ${p.content}`)
-              .join('\n\n'));
-      }
-
-      if (referenceDocs && referenceDocs.length > 0) {
-        documentContext +=
-          `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH (CHỈ DÙNG BỔ TRỢ LUẬN ĐIỂM, KHÔNG TRÍCH LÀM LỜI TÁC PHẨM) ===\n` +
-          referenceDocs
-            .map(
-              (d) =>
-                `[TÀI LIỆU THAM KHẢO: "${d.title}" | PHÂN LOẠI: ${d.referenceType || 'Tài liệu bổ trợ'}]:\n${d.rawContent || ''}`
-            )
-            .join('\n\n---\n\n');
-      } else if (mockDocumentSnippets.length > 0 && !primaryDoc) {
-        documentContext += `\n\n[TÀI LIỆU HỌC TẬP CHÍNH THỐNG ĐƯỢC GIÁO VIÊN CUNG CẤP]:\n${mockDocumentSnippets.join(
-          '\n\n---\n\n'
-        )}`;
+      // Use structured context from pre-retrieval when available
+      let documentContext = promptContextText;
+      if (!documentContext) {
+        if (primaryDoc) {
+          const samplePara = primaryDoc.paragraphs.slice(0, 10).map((p) => `[P${p.paragraph_order}]: ${p.content}`).join('\n\n');
+          documentContext += `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC ===\n${samplePara}`;
+        }
+        if (referenceDocs && referenceDocs.length > 0) {
+          const sampleRef = referenceDocs.map((d, i) => `[R${i + 1} - ${d.title}]:\n${(d.rawContent || '').slice(0, 1200)}`).join('\n\n');
+          documentContext += `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH ===\n${sampleRef}`;
+        }
       }
 
       const formattedHistory =
         chatHistory && chatHistory.length > 0
           ? `\n\n[NGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ GIỮA CÔ VÀ EM]:\n` +
             chatHistory
-              .slice(-6)
+              .slice(-4)
               .map((h) => `${h.sender === 'user' ? 'Em' : 'Cô Dương'}: ${h.text}`)
               .join('\n\n') +
             `\n\n[CÂU HỎI TIẾP THEO HIỆN TẠI CỦA EM]:\n"${studentQuestion}"`
@@ -2265,13 +2331,11 @@ ${documentContext}
 ${formattedHistory}
 
 [YÊU CẦU BẮT BUỘC VỀ NGUỒN TÀI LIỆU & TRÍCH DẪN]:
-1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC:
-   - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ở trên (đặt trong khối markdown > "...").
+1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC ([P]):
+   - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ([P]) ở trên (đặt trong khối markdown > "...").
    - TUYỆT ĐỐI KHÔNG trích nguyên văn từ tài liệu tham khảo/phân tích giả mạo thành lời văn tác phẩm.
-   - Nếu không có câu trích phù hợp, cô hãy diễn giải dựa trên chi tiết có căn cứ, không bắt buộc ép trích dẫn.
-2. TRẢ LỜI LIỀN MẠCH, THẤU ĐÁO THEO NGỮ CẢNH HỘI THOẠI:
-   - Dựa trên lịch sử trao đổi trên để hiểu các câu hỏi nối tiếp của em.
-   - Hãy trả lời trực tiếp, giải thích rõ ràng, phân tích sâu sắc vào câu hỏi của em.
+2. SỬ DỤNG MÃ NGUỒN THAM KHẢO ([R]):
+   - Khi vận dụng luận điểm, kiến thức từ tài liệu tham khảo, hãy đánh dấu mã tương ứng như [R1], [R2].
 3. NẾU THIẾU CĂN CỨ:
    - Nếu câu hỏi hoàn toàn xa lạ hoặc không có trong tài liệu bài học, hãy từ chối lịch sự bằng câu:
      "Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm '${workTitle}', cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!"
@@ -2286,7 +2350,7 @@ ${formattedHistory}
           workTitle,
         });
 
-        return this.verifyAndBuildRagResult({
+        const verifiedResult = this.verifyAndBuildRagResult({
           fullResponseText: thirdPartyRes.text,
           workTitle,
           primaryDoc,
@@ -2295,8 +2359,35 @@ ${formattedHistory}
           actualModelUsed: thirdPartyRes.modelUsed,
           apiKeyMasked: thirdPartyRes.apiKeyMasked,
           fileSearchStoreNames,
-          toolActuallyUsed: true,
+          toolActuallyUsed: false,
+          retrievedChunks,
         });
+
+        const traceId = await this.recordRagTrace({
+          traceSource,
+          userId,
+          workId,
+          queryText: studentQuestion,
+          learningMode,
+          processingMethod: 'internal_rag_third_party',
+          modelName: thirdPartyRes.modelUsed,
+          promptTokensReported: thirdPartyRes.tokenCount,
+          outputTokensReported: Math.round(thirdPartyRes.text.length / 4),
+          promptTokensEstimated: tokenBreakdown,
+          retrievedChunks,
+          contextSent: { promptLength: groundingPrompt.length },
+          rawOutput: thirdPartyRes.text,
+          finalOutput: verifiedResult.text,
+          citations: verifiedResult.citations,
+          latencyMs: Date.now() - startTime,
+          lackOfSource: verifiedResult.isNoSource,
+          isMock: false,
+        });
+
+        return {
+          ...verifiedResult,
+          traceId: traceId || undefined,
+        };
       } catch (tpErr: any) {
         console.error('[GeminiService] ThirdParty call failed, fallback to mock:', tpErr);
         const mockRes = this.runMockFileSearch({
@@ -2309,10 +2400,31 @@ ${formattedHistory}
           referenceDocs,
           chatHistory,
         });
+        const traceId = await this.recordRagTrace({
+          traceSource,
+          userId,
+          workId,
+          queryText: studentQuestion,
+          learningMode,
+          processingMethod: 'mock',
+          modelName: `Bên thứ 3 lỗi (${tpErr.message || 'Error'}) - Ngoại tuyến`,
+          promptTokensEstimated: tokenBreakdown,
+          retrievedChunks,
+          rawOutput: mockRes.text,
+          finalOutput: mockRes.text,
+          latencyMs: Date.now() - startTime,
+          fallbackOccurred: true,
+          lackOfSource: isLackOfSource,
+          errorMessage: tpErr.message,
+          isMock: true,
+        });
         return {
           ...mockRes,
           isLiveAi: false,
+          isMock: true,
           modelUsed: `Bên thứ 3 lỗi (${tpErr.message || 'Error'}) - Ngoại tuyến`,
+          toolActuallyUsed: false,
+          traceId: traceId || undefined,
         };
       }
     }
@@ -2334,10 +2446,31 @@ ${formattedHistory}
         referenceDocs,
         chatHistory,
       });
+      const traceId = await this.recordRagTrace({
+        traceSource,
+        userId,
+        workId,
+        queryText: studentQuestion,
+        learningMode,
+        processingMethod: 'mock',
+        modelName: 'Tài liệu giáo viên (Ngoại tuyến)',
+        promptTokensEstimated: tokenBreakdown,
+        retrievedChunks,
+        rawOutput: mockRes.text,
+        finalOutput: mockRes.text,
+        citations: mockRes.citations,
+        latencyMs: Date.now() - startTime,
+        fallbackOccurred: false,
+        lackOfSource: isLackOfSource,
+        isMock: true,
+      });
       return {
         ...mockRes,
         isLiveAi: false,
+        isMock: true,
         modelUsed: 'Tài liệu giáo viên (Ngoại tuyến)',
+        toolActuallyUsed: fileSearchStoreNames.length > 0 && mockDocumentSnippets.length > 0 ? mockRes.toolActuallyUsed : false,
+        traceId: traceId || undefined,
       };
     }
 
@@ -2427,25 +2560,23 @@ ${formattedHistory}
 
         // Strategy B: Direct Context Grounding via client.models.generateContent
         if (!apiSucceeded) {
-          let documentContext = '';
-          if (primaryDoc) {
-            documentContext += `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC (NGUỒN DUY NHẤT ĐƯỢC PHÉP TRÍCH NGUYÊN VĂN) ===\n` +
-              `Tiêu đề: "${primaryDoc.title}" (Phiên bản: ${primaryDoc.version})\n` +
-              (primaryDoc.rawContent || primaryDoc.paragraphs.map(p => `[Đoạn ${p.paragraph_order}${p.page_number ? ` - Trang ${p.page_number}` : ''}]: ${p.content}`).join('\n\n'));
-          }
-
-          if (referenceDocs && referenceDocs.length > 0) {
-            documentContext += `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH (CHỈ DÙNG BỔ TRỢ LUẬN ĐIỂM, KHÔNG TRÍCH LÀM LỜI TÁC PHẨM) ===\n` +
-              referenceDocs.map(d => `[TÀI LIỆU THAM KHẢO: "${d.title}" | PHÂN LOẠI: ${d.referenceType || 'Tài liệu bổ trợ'}]:\n${d.rawContent || ''}`).join('\n\n---\n\n');
-          } else if (mockDocumentSnippets.length > 0 && !primaryDoc) {
-            documentContext += `\n\n[TÀI LIỆU HỌC TẬP CHÍNH THỐNG ĐƯỢC GIÁO VIÊN CUNG CẤP]:\n${mockDocumentSnippets.join('\n\n---\n\n')}`;
+          let documentContext = promptContextText;
+          if (!documentContext) {
+            if (primaryDoc) {
+              const samplePara = primaryDoc.paragraphs.slice(0, 10).map((p) => `[P${p.paragraph_order}]: ${p.content}`).join('\n\n');
+              documentContext += `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC ===\n${samplePara}`;
+            }
+            if (referenceDocs && referenceDocs.length > 0) {
+              const sampleRef = referenceDocs.map((d, i) => `[R${i + 1} - ${d.title}]:\n${(d.rawContent || '').slice(0, 1200)}`).join('\n\n');
+              documentContext += `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH ===\n${sampleRef}`;
+            }
           }
 
           const formattedHistory =
             chatHistory && chatHistory.length > 0
               ? `\n\n[NGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ GIỮA CÔ VÀ EM]:\n` +
                 chatHistory
-                  .slice(-6)
+                  .slice(-4)
                   .map((h) => `${h.sender === 'user' ? 'Em' : 'Cô Dương'}: ${h.text}`)
                   .join('\n\n') +
                 `\n\n[CÂU HỎI TIẾP THEO HIỆN TẠI CỦA EM]:\n"${studentQuestion}"`
@@ -2458,13 +2589,11 @@ ${documentContext}
 ${formattedHistory}
 
 [YÊU CẦU BẮT BUỘC VỀ NGUỒN TÀI LIỆU & TRÍCH DẪN]:
-1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC:
-   - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ở trên (đặt trong khối markdown > "...").
+1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC ([P]):
+   - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ([P]) ở trên (đặt trong khối markdown > "...").
    - TUYỆT ĐỐI KHÔNG trích nguyên văn từ tài liệu tham khảo/phân tích giả mạo thành lời văn tác phẩm.
-   - Nếu không có câu trích phù hợp, cô hãy diễn giải dựa trên chi tiết có căn cứ, không bắt buộc ép trích dẫn.
-2. TRẢ LỜI LIỀN MẠCH, THẤU ĐÁO THEO NGỮ CẢNH HỘI THOẠI:
-   - Dựa trên lịch sử trao đổi trên để hiểu các câu hỏi nối tiếp của em.
-   - Hãy trả lời trực tiếp, giải thích rõ ràng, phân tích sâu sắc vào câu hỏi của em.
+2. SỬ DỤNG MÃ NGUỒN THAM KHẢO ([R]):
+   - Khi vận dụng luận điểm, kiến thức từ tài liệu tham khảo, hãy đánh dấu mã tương ứng như [R1], [R2].
 3. NẾU THIẾU CĂN CỨ:
    - Nếu câu hỏi hoàn toàn xa lạ hoặc không có trong tài liệu bài học, hãy từ chối lịch sự bằng câu:
      "Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm '${workTitle}', cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!"
@@ -2508,7 +2637,7 @@ ${formattedHistory}
                   const pTokens = usageMeta?.promptTokenCount ?? Math.ceil(groundingPrompt.length / 4);
                   const oTokens = usageMeta?.candidatesTokenCount ?? Math.ceil(fullResponseText.length / 4);
                   tokenCount = usageMeta?.totalTokenCount ?? (pTokens + oTokens);
-                  toolActuallyUsed = true;
+                  toolActuallyUsed = false; // Direct context grounding, not external tool API
                   apiSucceeded = true;
                   actualModelUsed = candidateModel;
                   await this.recordKeyUsage({
@@ -2551,7 +2680,7 @@ ${formattedHistory}
           }
         }
 
-        return this.verifyAndBuildRagResult({
+        const verifiedResult = this.verifyAndBuildRagResult({
           fullResponseText,
           workTitle,
           primaryDoc,
@@ -2562,7 +2691,33 @@ ${formattedHistory}
           fileSearchStoreNames,
           toolActuallyUsed,
           initialCitations: citations,
+          retrievedChunks,
         });
+
+        const traceId = await this.recordRagTrace({
+          traceSource,
+          userId,
+          workId,
+          queryText: studentQuestion,
+          learningMode,
+          processingMethod: toolActuallyUsed ? 'google_file_search' : 'internal_rag',
+          modelName: actualModelUsed,
+          promptTokensReported: tokenCount,
+          outputTokensReported: Math.round(fullResponseText.length / 4),
+          promptTokensEstimated: tokenBreakdown,
+          retrievedChunks,
+          rawOutput: fullResponseText,
+          finalOutput: verifiedResult.text,
+          citations: verifiedResult.citations,
+          latencyMs: Date.now() - startTime,
+          lackOfSource: verifiedResult.isNoSource,
+          isMock: false,
+        });
+
+        return {
+          ...verifiedResult,
+          traceId: traceId || undefined,
+        };
       } catch (keyErr: any) {
         lastApiError = keyErr;
         console.warn(
@@ -2600,10 +2755,31 @@ ${formattedHistory}
       referenceDocs,
       chatHistory,
     });
+    const traceId = await this.recordRagTrace({
+      traceSource,
+      userId,
+      workId,
+      queryText: studentQuestion,
+      learningMode,
+      processingMethod: 'mock',
+      modelName: 'Tài liệu giáo viên (Ngoại tuyến)',
+      promptTokensEstimated: tokenBreakdown,
+      retrievedChunks,
+      rawOutput: mockRes.text,
+      finalOutput: mockRes.text,
+      latencyMs: Date.now() - startTime,
+      fallbackOccurred: true,
+      lackOfSource: isLackOfSource,
+      errorMessage: lastApiError?.message,
+      isMock: true,
+    });
     return {
       ...mockRes,
       isLiveAi: false,
+      isMock: true,
       modelUsed: 'Tài liệu giáo viên (Ngoại tuyến)',
+      toolActuallyUsed: false,
+      traceId: traceId || undefined,
     };
   }
 
@@ -2935,4 +3111,79 @@ ${formattedHistory}
 
     return Array.from(new Set(suggestions)).slice(0, 3);
   }
+
+  /**
+   * Lưu vết RAG trace bền vững vào bảng rag_traces phục vụ kiểm tra và đánh giá
+   */
+  static async recordRagTrace(traceData: {
+    traceSource?: 'student' | 'admin_lab' | 'eval_batch';
+    userId?: string;
+    workId?: string;
+    queryText: string;
+    learningMode: string;
+    processingMethod: string;
+    modelName?: string;
+    promptTokensReported?: number;
+    outputTokensReported?: number;
+    promptTokensEstimated?: Record<string, any>;
+    retrievedChunks?: any[];
+    contextSent?: Record<string, any>;
+    rawOutput?: string;
+    finalOutput?: string;
+    quoteVerificationResult?: Record<string, any>;
+    citations?: any[];
+    latencyMs?: number;
+    retryCount?: number;
+    fallbackOccurred?: boolean;
+    lackOfSource?: boolean;
+    errorMessage?: string;
+    isMock?: boolean;
+  }): Promise<string | null> {
+    try {
+      const { rows } = await query<{ id: string }>(
+        `INSERT INTO rag_traces (
+          trace_source, user_id, work_id, query_text, learning_mode,
+          processing_method, model_name, prompt_tokens_reported, output_tokens_reported,
+          prompt_tokens_estimated, retrieved_chunks, context_sent, raw_output,
+          final_output, quote_verification_result, citations, latency_ms,
+          retry_count, fallback_occurred, lack_of_source, error_message, is_mock
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9,
+          $10, $11, $12, $13,
+          $14, $15, $16, $17,
+          $18, $19, $20, $21, $22
+        ) RETURNING id`,
+        [
+          traceData.traceSource || 'student',
+          traceData.userId || null,
+          traceData.workId || null,
+          traceData.queryText,
+          traceData.learningMode,
+          traceData.processingMethod,
+          traceData.modelName || null,
+          traceData.promptTokensReported || 0,
+          traceData.outputTokensReported || 0,
+          JSON.stringify(traceData.promptTokensEstimated || {}),
+          JSON.stringify(traceData.retrievedChunks || []),
+          JSON.stringify(traceData.contextSent || {}),
+          traceData.rawOutput || null,
+          traceData.finalOutput || null,
+          JSON.stringify(traceData.quoteVerificationResult || {}),
+          JSON.stringify(traceData.citations || []),
+          traceData.latencyMs || 0,
+          traceData.retryCount || 0,
+          traceData.fallbackOccurred || false,
+          traceData.lackOfSource || false,
+          traceData.errorMessage || null,
+          traceData.isMock || false,
+        ]
+      );
+      return rows[0]?.id || null;
+    } catch (err) {
+      console.warn('[GeminiService] Failed to record rag trace:', err);
+      return null;
+    }
+  }
 }
+

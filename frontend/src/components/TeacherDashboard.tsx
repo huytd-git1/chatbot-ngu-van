@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import {
   Download, RefreshCw, Lock, Unlock,
   KeyRound, Shield, FileText, CheckCircle2, AlertCircle, Trash2, Award, Calendar,
-  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info, Upload
+  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info, Upload, Sparkles
 } from 'lucide-react';
 import type { ClassItem, StudentItem, Work, DocumentItem, ParagraphItem, DocumentDiffReport } from '../types.js';
 import { apiRequest } from '../api/client.js';
+import { DocumentMetadataModal } from './DocumentMetadataModal.js';
 
 export const TeacherDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'classes' | 'csv' | 'works' | 'settings'>('overview');
@@ -57,6 +58,10 @@ export const TeacherDashboard: React.FC = () => {
   const [diffReport, setDiffReport] = useState<DocumentDiffReport | null>(null);
   const [loadingDiffReport, setLoadingDiffReport] = useState(false);
   const [showDiffModal, setShowDiffModal] = useState(false);
+
+  // Metadata Modal
+  const [selectedDocForMetadata, setSelectedDocForMetadata] = useState<DocumentItem | null>(null);
+  const [showMetadataModal, setShowMetadataModal] = useState(false);
 
   // TOTP 2FA
   const [totpQr, setTotpQr] = useState<string | null>(null);
@@ -1068,6 +1073,17 @@ export const TeacherDashboard: React.FC = () => {
                             />
                           </label>
                           <button
+                            onClick={() => {
+                              setSelectedDocForMetadata(activePrimary);
+                              setShowMetadataModal(true);
+                            }}
+                            title="Xem hoặc tạo lại metadata trích xuất cấu trúc RAG"
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 text-[11px] font-semibold transition-colors cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Metadata</span>
+                          </button>
+                          <button
                             onClick={() => handleViewParagraphs(activePrimary)}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 text-[11px] font-semibold hover:bg-emerald-100 transition-colors cursor-pointer"
                           >
@@ -1125,6 +1141,17 @@ export const TeacherDashboard: React.FC = () => {
                                   }}
                                 />
                               </label>
+                              <button
+                                onClick={() => {
+                                  setSelectedDocForMetadata(p);
+                                  setShowMetadataModal(true);
+                                }}
+                                title="Xem hoặc tạo lại metadata"
+                                className="text-[11px] text-amber-800 hover:text-amber-950 flex items-center gap-0.5 cursor-pointer font-medium"
+                              >
+                                <Sparkles className="w-3 h-3 text-amber-600" />
+                                <span>Metadata</span>
+                              </button>
                               <button
                                 onClick={() => handleViewParagraphs(p)}
                                 className="text-[11px] text-slate-600 hover:text-slate-900 underline cursor-pointer"
@@ -1218,6 +1245,17 @@ export const TeacherDashboard: React.FC = () => {
                                 }}
                               />
                             </label>
+                            <button
+                              onClick={() => {
+                                setSelectedDocForMetadata(d);
+                                setShowMetadataModal(true);
+                              }}
+                              title="Xem hoặc tạo lại metadata (tóm tắt, chủ đề, luận điểm, câu hỏi-đáp RAG)"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-semibold cursor-pointer transition-colors shadow-2xs"
+                            >
+                              <Sparkles className="w-3 h-3 text-amber-600" />
+                              <span>Metadata</span>
+                            </button>
                             <button
                               onClick={() => handleViewParagraphs(d)}
                               title="Xem các đoạn trích xuất"
@@ -1321,6 +1359,17 @@ export const TeacherDashboard: React.FC = () => {
                                 }}
                               />
                             </label>
+                            <button
+                              onClick={() => {
+                                setSelectedDocForMetadata(d);
+                                setShowMetadataModal(true);
+                              }}
+                              title="Xem hoặc tạo lại metadata"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-semibold cursor-pointer transition-colors shadow-2xs"
+                            >
+                              <Sparkles className="w-3 h-3 text-amber-600" />
+                              <span>Metadata</span>
+                            </button>
                             <button
                               onClick={() => handleUpdateClassification(d.id, 'reference', 'analysis')}
                               className="px-2.5 py-1 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-[11px] font-semibold cursor-pointer shadow-2xs"
@@ -1608,6 +1657,23 @@ export const TeacherDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL 3: XEM VÀ DUYỆT METADATA TRÍCH XUẤT */}
+      {showMetadataModal && selectedDocForMetadata && (
+        <DocumentMetadataModal
+          documentId={selectedDocForMetadata.id}
+          documentTitle={selectedDocForMetadata.title}
+          onClose={() => {
+            setShowMetadataModal(false);
+            setSelectedDocForMetadata(null);
+          }}
+          onMetadataUpdated={() => {
+            if (selectedWorkId) {
+              loadDocuments(selectedWorkId);
+            }
+          }}
+        />
       )}
     </div>
   );

@@ -9,9 +9,10 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../api/client.js';
 import type { KeyPoolItem, TokenStatsSummary, ThirdPartyPreset, SupportedModel, ThirdPartyModel } from '../types.js';
+import { RagEvaluationDashboard } from './RagEvaluationDashboard.js';
 
 export const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'teachers' | 'classes' | 'ai' | 'system' | 'logs'>('teachers');
+  const [activeTab, setActiveTab] = useState<'teachers' | 'classes' | 'ai' | 'system' | 'logs' | 'rag_eval'>('teachers');
 
   // Teachers
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -618,6 +619,7 @@ export const AdminDashboard: React.FC = () => {
           { id: 'teachers', label: 'Quản lý Giáo viên', icon: Users },
           { id: 'classes', label: 'Quản lý Lớp & Học sinh', icon: GraduationCap },
           { id: 'ai', label: 'Quản lý AI & Gemini Model', icon: Sparkles },
+          { id: 'rag_eval', label: 'Kiểm tra & đánh giá RAG', icon: Activity },
           { id: 'system', label: 'Hạn mức & Công tắc khẩn cấp', icon: Settings },
           { id: 'logs', label: 'Nhật ký kiểm toán', icon: History },
         ].map((t) => {
@@ -2315,6 +2317,9 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* TAB 6: RAG EVALUATION & BENCHMARK */}
+      {activeTab === 'rag_eval' && <RagEvaluationDashboard />}
     </div>
   );
 };

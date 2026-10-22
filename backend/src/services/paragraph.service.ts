@@ -120,6 +120,25 @@ export class ParagraphService {
       }
     }
 
+    // Sync to document_chunks for RAG v2
+    try {
+      const { rows: docRows } = await query<{ document_role: string }>(
+        `SELECT document_role FROM documents WHERE id = $1`,
+        [documentId]
+      );
+      const role = (docRows[0]?.document_role === 'primary' ? 'primary' : 'reference') as 'primary' | 'reference';
+      const { ChunkService } = await import('./chunk.service.js');
+      await ChunkService.extractAndSaveChunks({
+        documentId,
+        workId,
+        version,
+        role,
+        rawText,
+      });
+    } catch (chunkErr) {
+      console.warn('[ParagraphService] Warning syncing to document_chunks:', chunkErr);
+    }
+
     return { count: savedParagraphs.length, paragraphs: savedParagraphs };
   }
 

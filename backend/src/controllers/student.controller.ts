@@ -265,6 +265,9 @@ export class StudentController {
           rawContent: r.raw_content,
         })),
         chatHistory: parse.data.history,
+        workId: work.id,
+        userId: req.user.id,
+        traceSource: 'student',
       });
 
       if (ragResult.isNoSource) {
@@ -280,6 +283,27 @@ export class StudentController {
           toolActuallyUsed: ragResult.toolActuallyUsed,
           modelUsed: ragResult.modelUsed || GeminiService.getConfiguredModelName(),
           isLiveAi: ragResult.isLiveAi ?? GeminiService.isLiveApiConfigured(),
+          isMock: false,
+          traceId: ragResult.traceId,
+        });
+        return;
+      }
+
+      if (ragResult.isMock) {
+        // Fallback to offline mock due to API failure -> do not deduct student quota!
+        await QuotaService.recordFailure(req.user.id, idempotencyKey, 'Chuyển sang chế độ ngoại tuyến (Mock)');
+        res.status(200).json({
+          answer: ragResult.text,
+          citations: ragResult.citations,
+          primaryCitations: ragResult.primaryCitations || [],
+          referenceCitations: ragResult.referenceCitations || [],
+          isNoSource: false,
+          isMock: true,
+          toolConfigured: ragResult.toolConfigured,
+          toolActuallyUsed: false,
+          modelUsed: ragResult.modelUsed || 'Tài liệu giáo viên (Ngoại tuyến)',
+          isLiveAi: false,
+          traceId: ragResult.traceId,
         });
         return;
       }

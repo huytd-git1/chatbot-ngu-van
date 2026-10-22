@@ -297,13 +297,183 @@ export async function runMigrations() {
     ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_api_key TEXT;
     ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS custom_model_name VARCHAR(100) DEFAULT 'google/gemini-2.5-flash';
     ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS key_models TEXT DEFAULT '{}';
+    `,
+    `
+    -- Enable pg_trgm extension if available for keyword similarity search
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+    `,
+    `
+    -- Table for rich document chunks (primary & reference)
+    CREATE TABLE IF NOT EXISTS document_chunks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      chunk_order INTEGER NOT NULL,
+      chunk_role VARCHAR(30) NOT NULL CHECK (chunk_role IN ('primary', 'reference')),
+      section_title VARCHAR(255),
+      page_number INTEGER,
+      start_offset INTEGER NOT NULL DEFAULT 0,
+      end_offset INTEGER NOT NULL DEFAULT 0,
+      content TEXT NOT NULL,
+      normalized_content TEXT NOT NULL,
+      content_hash VARCHAR(64) NOT NULL,
+      token_count INTEGER NOT NULL DEFAULT 0,
+      token_method VARCHAR(30) DEFAULT 'estimated_chars',
+      metadata JSONB DEFAULT '{}'::jsonb,
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_chunks_doc ON document_chunks(document_id);
+    CREATE INDEX IF NOT EXISTS idx_chunks_work_role ON document_chunks(work_id, chunk_role);
+    CREATE INDEX IF NOT EXISTS idx_chunks_hash ON document_chunks(content_hash);
+    `,
+    `
+    -- Table for document metadata ("Tạo lại metadata")
+    CREATE TABLE IF NOT EXISTS document_metadata (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL DEFAULT 1,
+      status VARCHAR(30) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'active', 'rejected', 'outdated')),
+      generation_method VARCHAR(50) DEFAULT 'ai_batch',
+      model_name VARCHAR(100),
+      summary TEXT,
+      themes JSONB DEFAULT '[]'::jsonb,
+      characters JSONB DEFAULT '[]'::jsonb,
+      literary_details JSONB DEFAULT '[]'::jsonb,
+      analysis_points JSONB DEFAULT '[]'::jsonb,
+      qa_pairs JSONB DEFAULT '[]'::jsonb,
+      keywords JSONB DEFAULT '[]'::jsonb,
+      chunk_links JSONB DEFAULT '[]'::jsonb,
+      token_usage JSONB DEFAULT '{}'::jsonb,
+      created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_doc_metadata_doc_status ON document_metadata(document_id, status);
+    `,
+    `
+    -- Table for background metadata generation jobs
+    CREATE TABLE IF NOT EXISTS metadata_jobs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
+      progress_pct INTEGER DEFAULT 0,
+      error_message TEXT,
+      created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      metadata_id UUID REFERENCES document_metadata(id) ON DELETE SET NULL,
+      started_at TIMESTAMP WITH TIME ZONE,
+      completed_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_meta_jobs_doc_status ON metadata_jobs(document_id, status);
+    `,
+    `
+    -- Table for persistent RAG query traces
+    CREATE TABLE IF NOT EXISTS rag_traces (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      trace_source VARCHAR(30) NOT NULL DEFAULT 'student' CHECK (trace_source IN ('student', 'admin_lab', 'eval_batch')),
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      work_id UUID REFERENCES works(id) ON DELETE SET NULL,
+      chat_request_id UUID REFERENCES chat_requests(id) ON DELETE SET NULL,
+      query_text TEXT NOT NULL,
+      learning_mode VARCHAR(50) NOT NULL,
+      processing_method VARCHAR(50) NOT NULL,
+      model_name VARCHAR(100),
+      prompt_tokens_reported INTEGER DEFAULT 0,
+      output_tokens_reported INTEGER DEFAULT 0,
+      prompt_tokens_estimated JSONB DEFAULT '{}'::jsonb,
+      retrieved_chunks JSONB DEFAULT '[]'::jsonb,
+      context_sent JSONB DEFAULT '{}'::jsonb,
+      raw_output TEXT,
+      final_output TEXT,
+      quote_verification_result JSONB DEFAULT '{}'::jsonb,
+      citations JSONB DEFAULT '[]'::jsonb,
+      latency_ms INTEGER DEFAULT 0,
+      retry_count INTEGER DEFAULT 0,
+      fallback_occurred BOOLEAN DEFAULT FALSE,
+      lack_of_source BOOLEAN DEFAULT FALSE,
+      error_message TEXT,
+      is_mock BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_rag_traces_work ON rag_traces(work_id);
+    CREATE INDEX IF NOT EXISTS idx_rag_traces_created ON rag_traces(created_at);
+    CREATE INDEX IF NOT EXISTS idx_rag_traces_source ON rag_traces(trace_source);
+    `,
+    `
+    -- Table for human evaluator reviews
+    CREATE TABLE IF NOT EXISTS rag_manual_evaluations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      trace_id UUID NOT NULL REFERENCES rag_traces(id) ON DELETE CASCADE,
+      evaluator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      retrieval_rating VARCHAR(30) CHECK (retrieval_rating IN ('correct', 'partially_correct', 'wrong', 'not_applicable')),
+      evidence_missing BOOLEAN DEFAULT FALSE,
+      quote_accuracy VARCHAR(30) CHECK (quote_accuracy IN ('exact', 'distorted', 'fabricated', 'none')),
+      analysis_grounded VARCHAR(30) CHECK (analysis_grounded IN ('fully_supported', 'partially_supported', 'unsupported', 'hallucinated')),
+      mode_fit BOOLEAN DEFAULT TRUE,
+      notes TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_eval_trace ON rag_manual_evaluations(trace_id);
+    `,
+    `
+    -- Benchmark test sets and evaluation runs
+    CREATE TABLE IF NOT EXISTS rag_eval_testsets (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name VARCHAR(200) NOT NULL,
+      description TEXT,
+      created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS rag_eval_test_cases (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      testset_id UUID NOT NULL REFERENCES rag_eval_testsets(id) ON DELETE CASCADE,
+      work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      learning_mode VARCHAR(50) NOT NULL DEFAULT 'analysis',
+      question TEXT NOT NULL,
+      expected_ref_topics TEXT,
+      expected_quotes TEXT,
+      should_refuse BOOLEAN DEFAULT FALSE,
+      document_version INTEGER DEFAULT 1,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_eval_test_cases_set ON rag_eval_test_cases(testset_id);
+
+    CREATE TABLE IF NOT EXISTS rag_eval_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      testset_id UUID NOT NULL REFERENCES rag_eval_testsets(id) ON DELETE CASCADE,
+      name VARCHAR(200) NOT NULL,
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status VARCHAR(30) NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed', 'stopped')),
+      total_cases INTEGER DEFAULT 0,
+      completed_cases INTEGER DEFAULT 0,
+      passed_cases INTEGER DEFAULT 0,
+      avg_tokens INTEGER DEFAULT 0,
+      avg_latency_ms INTEGER DEFAULT 0,
+      accuracy_rate NUMERIC(5,2) DEFAULT 0,
+      results JSONB DEFAULT '[]'::jsonb,
+      error_message TEXT,
+      created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      completed_at TIMESTAMP WITH TIME ZONE
+    );
+    CREATE INDEX IF NOT EXISTS idx_eval_runs_testset ON rag_eval_runs(testset_id);
     `
   ];
 
   for (let i = 0; i < migrations.length; i++) {
     try {
       await query(migrations[i]);
-    } catch (err) {
+    } catch (err: any) {
+      if (migrations[i].includes('CREATE EXTENSION')) {
+        console.warn(`[Migration] Extension not supported in this environment, skipping: ${err.message}`);
+        continue;
+      }
       console.error(`[Migration] Error at step ${i + 1}:`, err);
       throw err;
     }
