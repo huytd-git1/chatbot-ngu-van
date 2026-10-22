@@ -27,9 +27,11 @@ app.use(
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'"],
+        upgradeInsecureRequests: null, // Cho phép tải JS/CSS khi truy cập bằng IP HTTP
       },
     },
     crossOriginEmbedderPolicy: false,
+    hsts: false, // Tắt HSTS khi chạy trực tiếp qua IP chưa có SSL
   })
 );
 
