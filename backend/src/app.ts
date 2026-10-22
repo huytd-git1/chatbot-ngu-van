@@ -64,7 +64,7 @@ app.get('/api/health', (req, res) => {
 
 // Provide CSRF token to frontend
 app.get('/api/csrf-token', (req, res) => {
-  res.status(200).json({ csrfToken: req.cookies?.csrf_token });
+  res.status(200).json({ csrfToken: (req as any).csrfToken || req.cookies?.csrf_token });
 });
 
 // 5. API Routes

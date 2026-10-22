@@ -95,9 +95,15 @@ export default function () {
     if (ok) {
       try {
         const body = JSON.parse(res.body);
-        csrfToken = body.csrfToken || '';
-      } catch (e) {
-        flowSuccess = false;
+        if (body && body.csrfToken) {
+          csrfToken = body.csrfToken;
+        }
+      } catch (e) {}
+
+      // Dự phòng: Lấy trực tiếp từ Cookie nếu body rỗng
+      if (!csrfToken && res.cookies && res.cookies['csrf_token']) {
+        const c = res.cookies['csrf_token'];
+        csrfToken = Array.isArray(c) ? c[0].value : c.value;
       }
     } else {
       errorCount.add(1);
@@ -131,6 +137,9 @@ export default function () {
     if (!ok) {
       errorCount.add(1);
       flowSuccess = false;
+      if (res.status !== 200) {
+        console.warn(`[Login Failed] HTTP ${res.status}: ${res.body}`);
+      }
     }
   });
 

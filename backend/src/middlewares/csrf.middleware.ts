@@ -20,6 +20,8 @@ export function csrfMiddleware() {
       });
     }
 
+    (req as any).csrfToken = csrfToken;
+
     // 2. Safe HTTP methods don't require verification
     const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
     if (safeMethods.includes(req.method)) {
