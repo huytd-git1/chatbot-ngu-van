@@ -18,7 +18,7 @@
 9. [Quy trình kiểm tra RAG với tài liệu kiểm soát](#9-quy-trình-kiểm-tra-rag-với-tài-liệu-kiểm-soát)
 10. [Gợi ý câu hỏi đào sâu thông minh từ trích dẫn bài học](#10-gợi-ý-câu-hỏi-đào-sâu-thông-minh-từ-trích-dẫn-bài-học)
 11. [Đưa mã nguồn lên GitHub](#11-đưa-mã-nguồn-lên-github)
-12. [Triển khai trực tuyến lên Render (Hosting miễn phí)](#12-triển-khai-trực-tuyến-lên-render)
+12. [Triển khai trực tuyến (Railway & Render)](#12-triển-khai-trực-tuyến)
 13. [Giới hạn gói miễn phí & Chi phí tiềm năng](#13-giới-hạn-gói-miễn-phí--chi-phí-tiềm-năng)
 14. [Sao lưu và khôi phục dữ liệu (Backup / Restore)](#14-sao-lưu-và-khôi-phục-dữ-liệu)
 15. [Xử lý sự cố thường gặp & Đổi khóa bí mật (Secrets Rotation)](#15-xử-lý-sự-cố--đổi-khóa-bí-mật)
@@ -259,19 +259,33 @@ Khác với các hệ thống RAG thông thường băm cố định 500 token l
 
 ---
 
-## 12. Triển khai trực tuyến lên Render
+## 12. Triển khai trực tuyến
 
-Dự án đã có sẵn tệp cấu hình **`render.yaml`** (Infrastructure as Code) giúp triển khai chỉ với vài cú nhấp chuột:
+### 12.1 Triển khai lên Railway (Khuyên dùng - Tốc độ cao, Không ngủ đông)
+
+Dự án đã tích hợp sẵn tệp cấu hình **[railway.json](file:///d:/Project/chatbot-ngu-van/railway.json)** và Dockerfile tối ưu:
+
+1. Đăng ký / Đăng nhập tài khoản tại [Railway.com](https://railway.com).
+2. Bấm nút **New Project** -> Chọn **Deploy from GitHub repo**.
+3. Chọn kho mã nguồn `chatbot-ngu-van`. Railway sẽ tự động nhận diện `Dockerfile` và tiến hành build toàn bộ hệ thống.
+4. Bấm vào service vừa tạo -> Chọn tab **Variables** và thêm các biến môi trường:
+   - `DATABASE_URL`: Dán chuỗi kết nối PostgreSQL (ví dụ chuỗi Neon PostgreSQL của bạn).
+   - `SESSION_SECRET`: Chuỗi ngẫu nhiên bất kỳ dài trên 16 ký tự.
+   - `NODE_ENV`: `production`.
+   - `GEMINI_API_KEY`: Khóa Gemini API thật (nếu có, hoặc nhập sau tại trang Admin).
+5. Chuyển sang tab **Settings** -> Cuộn xuống mục **Networking** -> Bấm nút **Generate Domain**.
+6. Railway sẽ cấp ngay một đường dẫn HTTPS tốc độ cao (ví dụ `xxx.up.railway.app`), máy chủ hoạt động liên tục 24/7 không bị ngủ đông.
+
+### 12.2 Triển khai trực tuyến lên Render
+
+Dự án có sẵn tệp cấu hình **`render.yaml`** (Infrastructure as Code):
 
 1. Đăng ký/Đăng nhập tại [Render.com](https://render.com).
 2. Kết nối tài khoản GitHub của bạn với Render.
 3. Chọn **Blueprints** -> **New Blueprint Instance**.
-4. Chọn kho mã nguồn `chatbot-ngu-van`. Render sẽ tự động đọc tệp `render.yaml` và tạo:
-   - 01 Web Service chạy Node.js (tự động build frontend và backend).
-   - 01 Database PostgreSQL miễn phí được liên kết sẵn.
-5. Tại trang cấu hình Environment Variables trên Render, nhập giá trị bí mật:
-   - `GEMINI_API_KEY`: Dán khóa Gemini API thật lấy từ Google AI Studio (hoặc cấu hình Cổng bên thứ ba qua giao diện Admin sau khi web khởi động).
-6. Nhấn **Apply**. Sau khoảng 3-5 phút, ứng dụng của bạn sẽ hoạt động trực tiếp tại địa chỉ URL do Render cấp phát.
+4. Chọn kho mã nguồn `chatbot-ngu-van`. Render sẽ tự động đọc tệp `render.yaml` và khởi tạo Web Service.
+5. Tại tab **Environment**, cập nhật `DATABASE_URL` trỏ tới PostgreSQL của bạn và `SESSION_SECRET`.
+6. Nhấn **Apply**. Web sẽ hoạt động tại địa chỉ URL do Render cấp phát.
 
 ---
 
