@@ -134,4 +134,114 @@ describe('Third-Party API Gateway (RouteAPI / OpenRouter / Custom)', () => {
     expect(resultFake.primaryCitations).toHaveLength(0);
     expect(resultFake.isNoSource).toBe(true);
   });
+
+  it('correctly handles multi-format third-party responses (array content, reasoning_content, think tags)', async () => {
+    const originalFetch = global.fetch;
+
+    try {
+      await GeminiService.updateAiConfig({
+        providerType: 'third_party',
+        customBaseUrl: 'https://api.mock-gateway.com/v1',
+        customApiKey: 'sk-test-token-12345678',
+        customModelName: 'deepseek/deepseek-r1',
+      });
+
+      // 1. Test Array Content [{ type: 'text', text: 'Chào em!' }]
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: [{ type: 'text', text: 'Chào em học sinh thân mến!' }],
+                },
+              },
+            ],
+            usage: { input_tokens: 120, output_tokens: 30, total_tokens: 150 },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        ) as any;
+
+      const res1 = await GeminiService.callThirdPartyChatCompletions({
+        groundingPrompt: 'Câu hỏi phân tích',
+        workTitle: 'Chí Phèo',
+      });
+      expect(res1.text).toBe('Chào em học sinh thân mến!');
+      expect(res1.tokenCount).toBe(150);
+      expect(res1.promptTokens).toBe(120);
+      expect(res1.outputTokens).toBe(30);
+
+      // 2. Test DeepSeek-R1 with reasoning_content and think tags
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: '<think>Phân tích tác phẩm Chí Phèo</think>Chào em, hình tượng Chí Phèo là...',
+                },
+              },
+            ],
+            usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        ) as any;
+
+      const res2 = await GeminiService.callThirdPartyChatCompletions({
+        groundingPrompt: 'Câu hỏi phân tích',
+        workTitle: 'Chí Phèo',
+      });
+      expect(res2.text).toBe('Chào em, hình tượng Chí Phèo là...');
+      expect(res2.tokenCount).toBe(280);
+
+      // 3. Test reasoning_content fallback when content is empty
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  reasoning_content: 'Chào em, đây là phân tích chi tiết.',
+                },
+              },
+            ],
+            usage: { prompt_tokens: 150, completion_tokens: 50 },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        ) as any;
+
+      const res3 = await GeminiService.callThirdPartyChatCompletions({
+        groundingPrompt: 'Câu hỏi phân tích',
+        workTitle: 'Chí Phèo',
+      });
+      expect(res3.text).toBe('Chào em, đây là phân tích chi tiết.');
+
+      // 4. Test Gemini Proxy format (candidates[0].content.parts[0].text)
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: 'Chào em từ cổng Gemini Proxy!' }],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        ) as any;
+
+      const res4 = await GeminiService.callThirdPartyChatCompletions({
+        groundingPrompt: 'Câu hỏi phân tích',
+        workTitle: 'Chí Phèo',
+      });
+      expect(res4.text).toBe('Chào em từ cổng Gemini Proxy!');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

@@ -1621,7 +1621,7 @@ export class GeminiService {
           messages.push({ role: 'user', content: groundingPrompt });
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 45000);
+          const timeoutId = setTimeout(() => controller.abort(), 120000);
 
           const response = await fetch(endpoint, {
             method: 'POST',
@@ -1633,6 +1633,7 @@ export class GeminiService {
             body: JSON.stringify({
               model: modelToUse,
               messages,
+              max_tokens: 3500,
               temperature: 0.7,
             }),
             signal: controller.signal,
@@ -1660,9 +1661,51 @@ export class GeminiService {
           }
 
           const data = (await response.json()) as any;
-          const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
-          if (!text || !text.trim()) {
-            throw new Error('Cổng phản hồi rỗng không chứa nội dung.');
+          let text = '';
+          const choice = data.choices?.[0];
+          if (choice) {
+            const rawContent = choice.message?.content;
+            if (typeof rawContent === 'string') {
+              text = rawContent;
+            } else if (Array.isArray(rawContent)) {
+              // Multimodal or multi-part content: [{type: 'text', text: '...'}]
+              text = rawContent
+                .map((part: any) => (typeof part === 'string' ? part : part?.text || ''))
+                .join('');
+            } else if (typeof choice.text === 'string') {
+              text = choice.text;
+            }
+
+            // Fallback for reasoning models (DeepSeek-R1, QwQ, etc.) where content is in reasoning_content or empty
+            if (!text.trim() && typeof choice.message?.reasoning_content === 'string') {
+              text = choice.message.reasoning_content;
+            }
+          } else if (Array.isArray(data.candidates) && data.candidates[0]?.content?.parts) {
+            // Google Gemini direct proxy
+            text = data.candidates[0].content.parts
+              .map((p: any) => (typeof p === 'string' ? p : p?.text || ''))
+              .join('');
+          } else if (Array.isArray(data.content)) {
+            // Anthropic Claude direct proxy
+            text = data.content
+              .map((part: any) => (typeof part === 'string' ? part : part?.text || ''))
+              .join('');
+          }
+
+          text = (text || '').trim();
+
+          // Strip <think>...</think> if the model wrapped reasoning in tags but also provided answer
+          if (text.includes('</think>')) {
+            const afterThink = text.split('</think>').pop()?.trim();
+            if (afterThink && afterThink.length > 20) {
+              text = afterThink;
+            } else {
+              text = text.replace(/<\/?think>/gi, '').trim();
+            }
+          }
+
+          if (!text) {
+            throw new Error('Cổng phản hồi rỗng không chứa nội dung văn bản.');
           }
 
           // Automatically remember the working model format if fallback was needed
@@ -1671,8 +1714,14 @@ export class GeminiService {
             this.customKeyModels.set(this.hashKey(currentKey), modelToUse);
           }
 
-          const pTokens = data.usage?.prompt_tokens ?? Math.ceil(groundingPrompt.length / 4);
-          const oTokens = data.usage?.completion_tokens ?? Math.ceil(text.length / 4);
+          const pTokens =
+            data.usage?.prompt_tokens ??
+            data.usage?.input_tokens ??
+            Math.ceil(groundingPrompt.length / 4);
+          const oTokens =
+            data.usage?.completion_tokens ??
+            data.usage?.output_tokens ??
+            Math.ceil(text.length / 4);
           const totalTokens = data.usage?.total_tokens ?? (pTokens + oTokens);
 
           await this.recordKeyUsage({
@@ -2096,15 +2145,17 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
         .map((c: any) => c.code);
 
       const isSourceNumCited = usedSourceIndices.has(docSourceIndex);
-      const isTitleMentioned = fullResponseText.toLowerCase().includes(r.title.toLowerCase());
+      const isTitleMentioned = (r.title && typeof r.title === 'string')
+        ? fullResponseText.toLowerCase().includes(r.title.toLowerCase())
+        : false;
       const isRefusal = fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ') || 
                         fullResponseText.toLowerCase().includes('không tìm thấy trong tài liệu');
 
-      if (!isRefusal && (citedChunks.length > 0 || isSourceNumCited || isTitleMentioned || (usedRefCodes.size === 0 && referenceDocs.length === 1))) {
+      if (!isRefusal && (citedChunks.length > 0 || isSourceNumCited || isTitleMentioned || docChunks.length > 0 || (usedRefCodes.size === 0 && referenceDocs.length === 1))) {
         referenceCitations.push({
           sourceIndex: docSourceIndex,
           sourceTag: `[${docSourceIndex}]`,
-          documentTitle: r.title,
+          documentTitle: r.title || 'Tài liệu tham khảo',
           referenceType: r.referenceType || 'analysis',
           role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
           citedChunks: citedChunks.length > 0 ? citedChunks : docChunks.map((c: any) => c.code),
@@ -2133,8 +2184,8 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
 
         if (vResult.verified && vResult.matchedParagraph) {
           primaryCitations.push({
-            documentTitle: primaryDoc!.title,
-            version: primaryDoc!.version,
+            documentTitle: primaryDoc?.title || workTitle || 'Văn bản tác phẩm',
+            version: primaryDoc?.version || 1,
             quote: rawQuote,
             pageNumber: vResult.matchedParagraph.page_number,
             paragraphOrder: vResult.matchedParagraph.paragraph_order,
@@ -2386,18 +2437,37 @@ ${formattedHistory}
           workTitle,
         });
 
-        const verifiedResult = this.verifyAndBuildRagResult({
-          fullResponseText: thirdPartyRes.text,
-          workTitle,
-          primaryDoc,
-          referenceDocs,
-          tokenCount: thirdPartyRes.tokenCount,
-          actualModelUsed: thirdPartyRes.modelUsed,
-          apiKeyMasked: thirdPartyRes.apiKeyMasked,
-          fileSearchStoreNames,
-          toolActuallyUsed: false,
-          retrievedChunks,
-        });
+        let verifiedResult: RagResult;
+        try {
+          verifiedResult = this.verifyAndBuildRagResult({
+            fullResponseText: thirdPartyRes.text,
+            workTitle,
+            primaryDoc,
+            referenceDocs,
+            tokenCount: thirdPartyRes.tokenCount,
+            actualModelUsed: thirdPartyRes.modelUsed,
+            apiKeyMasked: thirdPartyRes.apiKeyMasked,
+            fileSearchStoreNames,
+            toolActuallyUsed: false,
+            retrievedChunks,
+          });
+        } catch (vErr: any) {
+          console.error('[GeminiService] Error verifying third-party result, preserving live answer:', vErr);
+          verifiedResult = {
+            text: thirdPartyRes.text,
+            hasCitations: false,
+            citations: [],
+            primaryCitations: [],
+            referenceCitations: [],
+            tokenCount: thirdPartyRes.tokenCount,
+            apiKeyMasked: thirdPartyRes.apiKeyMasked,
+            isNoSource: false,
+            toolConfigured: false,
+            toolActuallyUsed: false,
+            modelUsed: thirdPartyRes.modelUsed,
+            isLiveAi: true,
+          };
+        }
 
         const traceId = await this.recordRagTrace({
           traceSource,
