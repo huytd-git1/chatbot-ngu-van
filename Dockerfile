@@ -28,7 +28,8 @@ FROM node:22-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=4000
+# Render mặc định kiểm tra cổng 10000 đối với Web Services (vẫn nhận biến PORT động nếu platform ghi đè)
+ENV PORT=10000
 
 # Cài đặt chỉ production dependencies cho backend
 COPY backend/package*.json ./
@@ -43,6 +44,6 @@ RUN mkdir -p /app/uploads && chown -R node:node /app
 
 USER node
 
-EXPOSE 4000
+EXPOSE 10000
 
 CMD ["node", "dist/index.js"]

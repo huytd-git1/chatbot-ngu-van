@@ -19,12 +19,16 @@ export function getDb(): IDbPool {
     const isExplicitNoSsl = env.DATABASE_URL.includes('sslmode=disable') || env.DATABASE_URL.includes('ssl=false');
     const sslConfig = !isLocal && !isExplicitNoSsl ? { rejectUnauthorized: false } : undefined;
 
+    // Chuẩn hóa connection string: gỡ bỏ channel_binding=require nếu copy từ Neon để tránh node-postgres bị hang
+    let cleanConnStr = env.DATABASE_URL;
+    cleanConnStr = cleanConnStr.replace(/([?&])channel_binding=[^&]+(&|$)/g, '$1').replace(/[?&]$/, '');
+
     const pool = new pg.Pool({
-      connectionString: env.DATABASE_URL,
+      connectionString: cleanConnStr,
       ssl: sslConfig,
       max: 15,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 20000,
+      connectionTimeoutMillis: 15000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
     });
