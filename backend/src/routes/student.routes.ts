@@ -12,6 +12,7 @@ const chatLimiter = rateLimit({
   message: { error: 'Bạn thao tác quá nhanh. Vui lòng chậm lại một chút để suy ngẫm nhé!' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
   skip: (req: any) => req.user?.role === 'admin' || !!req.user?.is_test_teacher,
 });
 

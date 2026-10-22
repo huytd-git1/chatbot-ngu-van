@@ -12,6 +12,7 @@ const loginLimiter = rateLimit({
   message: { error: 'Quá nhiều yêu cầu đăng nhập từ mạng này. Vui lòng thử lại sau 1 phút.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
 });
 
 authRouter.post('/login', loginLimiter, AuthController.login);

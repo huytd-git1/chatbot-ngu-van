@@ -13,6 +13,9 @@ import { adminRouter } from './routes/admin.routes.js';
 
 export const app = express();
 
+// Trust reverse proxy headers (Render, Cloudflare, load balancers)
+app.set('trust proxy', 1);
+
 // 1. Security Headers
 app.use(
   helmet({

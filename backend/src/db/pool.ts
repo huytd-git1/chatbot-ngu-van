@@ -19,19 +19,44 @@ export function getDb(): IDbPool {
     const pool = new pg.Pool({
       connectionString: env.DATABASE_URL,
       ssl: isRemote ? { rejectUnauthorized: false } : undefined,
-      max: 20,
+      max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
 
     pool.on('error', (err) => {
-      console.error('Unexpected error on idle PostgreSQL client', err);
+      console.warn('[PostgreSQL Pool] Cảnh báo kết nối nhàn rỗi (idle client):', err?.message || err);
     });
 
     dbInstance = {
       query: async (sql, params) => {
-        const res = await pool.query(sql, params);
-        return { rows: res.rows, rowCount: res.rowCount ?? 0 };
+        let attempts = 0;
+        const maxAttempts = 3;
+        while (attempts < maxAttempts) {
+          try {
+            const res = await pool.query(sql, params);
+            return { rows: res.rows, rowCount: res.rowCount ?? 0 };
+          } catch (err: any) {
+            attempts++;
+            const msg = (err?.message || '').toLowerCase();
+            const isConnErr =
+              msg.includes('connection terminated') ||
+              msg.includes('connection timeout') ||
+              msg.includes('closed') ||
+              err?.code === 'ECONNRESET' ||
+              err?.code === '57P01';
+
+            if (isConnErr && attempts < maxAttempts) {
+              console.warn(`[PostgreSQL Pool] Lỗi kết nối (${err?.message}), tự động thử lại kết nối mới (${attempts}/${maxAttempts})...`);
+              await new Promise((r) => setTimeout(r, 500 * attempts));
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw new Error('PostgreSQL query failed');
       },
       getClient: () => pool.connect(),
       end: () => pool.end(),
