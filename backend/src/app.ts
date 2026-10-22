@@ -72,15 +72,25 @@ app.use('/api/teacher', teacherRouter);
 app.use('/api/admin', adminRouter);
 
 // 6. Serve static files from Frontend build in production
-const frontendDistPath = path.resolve(process.cwd(), '../frontend/dist');
-const altDistPath = path.resolve(process.cwd(), 'frontend/dist');
-const distPath = fs.existsSync(frontendDistPath) ? frontendDistPath : altDistPath;
+const possibleDistPaths = [
+  path.resolve(process.cwd(), 'frontend/dist'),
+  path.resolve(process.cwd(), '../frontend/dist'),
+  path.resolve(process.cwd(), 'dist/frontend'),
+  path.resolve(process.cwd(), '../dist/frontend'),
+];
+const distPath = possibleDistPaths.find((p) => fs.existsSync(path.join(p, 'index.html'))) || possibleDistPaths[0];
 
 if (fs.existsSync(distPath)) {
+  console.log('[Server] Phục vụ giao diện Frontend từ thư mục:', distPath);
   app.use(express.static(distPath));
   app.get('*', (req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(distPath, 'index.html'));
+  });
+} else {
+  console.warn('[Server] Cảnh báo: Chưa tìm thấy thư mục build frontend. Danh sách đường dẫn đã kiểm tra:', possibleDistPaths);
+  app.get('/', (_req, res) => {
+    res.status(200).send('<h2>Hệ thống "Cô Dương dạy văn dễ thương" đang hoạt động!</h2><p>Đang chuẩn bị giao diện web, vui lòng làm mới trang sau vài giây...</p>');
   });
 }
 

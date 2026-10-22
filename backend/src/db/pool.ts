@@ -15,9 +15,25 @@ export function getDb(): IDbPool {
   if (dbInstance) return dbInstance;
 
   if (env.DATABASE_URL && env.DATABASE_URL !== 'memory') {
-    const isLocal = env.DATABASE_URL.includes('localhost') || env.DATABASE_URL.includes('127.0.0.1');
-    const isExplicitNoSsl = env.DATABASE_URL.includes('sslmode=disable') || env.DATABASE_URL.includes('ssl=false');
-    const sslConfig = !isLocal && !isExplicitNoSsl ? { rejectUnauthorized: false } : undefined;
+    const isLocal =
+      env.DATABASE_URL.includes('localhost') ||
+      env.DATABASE_URL.includes('127.0.0.1') ||
+      env.DATABASE_URL.includes('@postgres:') ||
+      env.DATABASE_URL.includes('@postgres/') ||
+      env.DATABASE_URL.includes('@db:') ||
+      env.DATABASE_URL.includes('@db/');
+    const isExplicitNoSsl =
+      env.DATABASE_URL.includes('sslmode=disable') ||
+      env.DATABASE_URL.includes('ssl=false') ||
+      process.env.DB_SSL === 'false';
+    const isExplicitSsl =
+      env.DATABASE_URL.includes('sslmode=require') ||
+      process.env.DB_SSL === 'true';
+    const sslConfig = isExplicitNoSsl
+      ? undefined
+      : isExplicitSsl || !isLocal
+      ? { rejectUnauthorized: false }
+      : undefined;
 
     // Chuẩn hóa connection string: gỡ bỏ channel_binding=require nếu copy từ Neon để tránh node-postgres bị hang
     let cleanConnStr = env.DATABASE_URL;
