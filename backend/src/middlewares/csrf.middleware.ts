@@ -7,9 +7,14 @@ export function csrfMiddleware() {
     let csrfToken = req.cookies?.csrf_token;
     if (!csrfToken) {
       csrfToken = crypto.randomBytes(24).toString('hex');
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      const cookieSecure = process.env.COOKIE_SECURE !== undefined
+        ? process.env.COOKIE_SECURE === 'true'
+        : (process.env.NODE_ENV === 'production' && isHttps);
+
       res.cookie('csrf_token', csrfToken, {
         httpOnly: false, // Readable by client JS to send in x-csrf-token header
-        secure: process.env.NODE_ENV === 'production',
+        secure: cookieSecure,
         sameSite: 'lax',
         path: '/',
       });

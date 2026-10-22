@@ -92,10 +92,15 @@ export class AuthController {
       req.ip || req.socket.remoteAddress
     );
 
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    const cookieSecure = process.env.COOKIE_SECURE !== undefined
+      ? process.env.COOKIE_SECURE === 'true'
+      : (process.env.NODE_ENV === 'production' && isHttps);
+
     // Set secure cookie
     res.cookie('session_id', sessionId, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: cookieSecure,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
