@@ -209,7 +209,8 @@ export class RagEvalController {
       }>(
         `SELECT id, title, reference_type, raw_content 
          FROM documents 
-         WHERE work_id = $1 AND document_role = 'reference' AND is_active = true`,
+         WHERE work_id = $1 AND document_role = 'reference' AND is_active = true AND status = 'ready'
+         ORDER BY created_at ASC`,
         [workId]
       );
 
@@ -217,11 +218,17 @@ export class RagEvalController {
         ? await ParagraphService.getParagraphsForDocument(primaryDocRow.id)
         : [];
 
-      // 2. Chạy Pre-Retrieval
+      // 2. Chạy Pre-Retrieval với referenceDocs đồng bộ
       const retrievalRes = await RetrievalService.retrieveAndBuildPrompt({
         workId,
         question,
         learningMode,
+        referenceDocs: refRows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          referenceType: r.reference_type,
+          rawContent: r.raw_content,
+        })),
       });
 
       // 3. Thực thi RAG Query với traceSource = 'admin_lab' (không trừ lượt)

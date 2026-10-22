@@ -59,6 +59,12 @@ export class RetrievalService {
     question: string;
     learningMode: string;
     history?: Array<{ role: string; content: string }>;
+    referenceDocs?: Array<{
+      id: string;
+      title: string;
+      referenceType?: string | null;
+      docType?: string | null;
+    }>;
   }): Promise<RetrievalResult> {
     const { workId, question, learningMode, history = [] } = params;
     const notes: string[] = [];
@@ -73,22 +79,25 @@ export class RetrievalService {
     }>(
       `SELECT id, title, document_role, doc_type, reference_type 
        FROM documents 
-       WHERE work_id = $1 AND is_active = true
+       WHERE work_id = $1 AND is_active = true AND status = 'ready'
        ORDER BY created_at ASC`,
       [workId]
     );
 
     const primaryDoc = activeDocs.find((d) => d.document_role === 'primary');
-    const referenceDocs = activeDocs.filter((d) => d.document_role === 'reference');
+    // Ưu tiên danh sách referenceDocs chính thức được truyền vào để đồng bộ 100% với GeminiService
+    const referenceDocs = (params.referenceDocs && params.referenceDocs.length > 0)
+      ? params.referenceDocs
+      : activeDocs.filter((d) => d.document_role === 'reference');
 
     // Ánh xạ từng tài liệu tham khảo với số thứ tự nguồn [1], [2]...
     const refDocMap = new Map<string, { index: number; title: string; docType: string; refType?: string }>();
-    referenceDocs.forEach((d, idx) => {
+    referenceDocs.forEach((d: any, idx: number) => {
       refDocMap.set(d.id, {
         index: idx + 1,
         title: d.title,
-        docType: d.doc_type,
-        refType: d.reference_type,
+        docType: d.doc_type || d.referenceType || 'analysis',
+        refType: d.reference_type || d.referenceType || 'analysis',
       });
     });
 
@@ -132,10 +141,15 @@ export class RetrievalService {
     const docChunkCounter = new Map<string, number>();
 
     for (const item of scoredRefChunks) {
+      // Chỉ chọn các chunk thuộc về danh sách referenceDocs đã xác thực
+      const docInfo = refDocMap.get(item.chunk.document_id);
+      if (!docInfo) {
+        continue;
+      }
+
       const tokens = item.chunk.token_count || ChunkService.estimateVietnameseTokens(item.chunk.content);
       if (currentRefTokens + tokens <= this.BUDGET.REFERENCE) {
-        const docInfo = refDocMap.get(item.chunk.document_id);
-        const sourceIndex = docInfo ? docInfo.index : 1;
+        const sourceIndex = docInfo.index;
         const chunkNum = (docChunkCounter.get(item.chunk.document_id) || 0) + 1;
         docChunkCounter.set(item.chunk.document_id, chunkNum);
 
@@ -145,7 +159,7 @@ export class RetrievalService {
           code: chunkCode,
           chunkId: item.chunk.id,
           documentId: item.chunk.document_id,
-          documentTitle: (item.chunk as any).document_title || docInfo?.title || 'Tài liệu tham khảo',
+          documentTitle: (item.chunk as any).document_title || docInfo.title || 'Tài liệu tham khảo',
           sourceIndex,
           sourceTag: `[${sourceIndex}]`,
           chunkOrderInDoc: chunkNum,
@@ -228,7 +242,7 @@ export class RetrievalService {
       const chunksForThisDoc = selectedRefChunks.filter((c) => c.documentId === doc.id);
       if (chunksForThisDoc.length > 0) {
         refContextLines.push(
-          `[Nguồn ${sourceNum}] "${doc.title}" (${doc.reference_type || 'Tài liệu hỗ trợ phân tích'}):\n` +
+          `[Nguồn ${sourceNum}] "${doc.title}" (${(doc as any).reference_type || (doc as any).referenceType || 'Tài liệu hỗ trợ phân tích'}):\n` +
           chunksForThisDoc
             .map((c) => `  + [${c.code}] ${c.sectionTitle ? `(${c.sectionTitle}) ` : ''}:\n${c.content}`)
             .join('\n\n')

@@ -2079,25 +2079,31 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
 
     const referenceCitations: ReferenceCitationMeta[] = [];
     (referenceDocs || []).forEach((r, i) => {
-      const sourceIndex = i + 1;
       const docChunks = retrievedChunks.filter(
         (c: any) => c.role === 'reference' && c.documentId === r.id
       );
+
+      // Luôn đồng bộ sourceIndex với mã chunk thực tế của tài liệu
+      const docSourceIndex = (docChunks.length > 0 && docChunks[0].sourceIndex)
+        ? docChunks[0].sourceIndex
+        : (docChunks.length > 0 && docChunks[0].code && docChunks[0].code.includes('-R'))
+        ? parseInt(docChunks[0].code.split('-R')[0], 10)
+        : (i + 1);
 
       // Check which chunk codes of this document were cited in the text
       const citedChunks = docChunks
         .filter((c: any) => c.code && usedRefCodes.has(c.code.toUpperCase()))
         .map((c: any) => c.code);
 
-      const isSourceNumCited = usedSourceIndices.has(sourceIndex);
+      const isSourceNumCited = usedSourceIndices.has(docSourceIndex);
       const isTitleMentioned = fullResponseText.toLowerCase().includes(r.title.toLowerCase());
       const isRefusal = fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ') || 
                         fullResponseText.toLowerCase().includes('không tìm thấy trong tài liệu');
 
       if (!isRefusal && (citedChunks.length > 0 || isSourceNumCited || isTitleMentioned || (usedRefCodes.size === 0 && referenceDocs.length === 1))) {
         referenceCitations.push({
-          sourceIndex,
-          sourceTag: `[${sourceIndex}]`,
+          sourceIndex: docSourceIndex,
+          sourceTag: `[${docSourceIndex}]`,
           documentTitle: r.title,
           referenceType: r.referenceType || 'analysis',
           role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
@@ -2272,6 +2278,7 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
           question: studentQuestion,
           learningMode,
           history: chatHistory.map((h) => ({ role: h.sender, content: h.text })),
+          referenceDocs,
         });
         retrievedChunks = retrievalRes.allSelectedChunks;
         tokenBreakdown = retrievalRes.tokenBreakdown;
