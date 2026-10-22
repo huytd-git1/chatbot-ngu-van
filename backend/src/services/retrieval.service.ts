@@ -4,10 +4,13 @@ import { ChunkService, DocumentChunkRow } from './chunk.service.js';
 import { MetadataService } from './metadata.service.js';
 
 export interface RetrievedChunk {
-  code: string; // e.g. R1, R2 hoặc P1, P2
+  code: string; // e.g. 1-R1, 1-R2, 2-R1 hoặc P1, P2
   chunkId: string;
   documentId: string;
   documentTitle: string;
+  sourceIndex?: number;
+  sourceTag?: string; // e.g. "[1]", "[2]"
+  chunkOrderInDoc?: number;
   role: 'primary' | 'reference';
   order: number;
   content: string;
@@ -60,21 +63,34 @@ export class RetrievalService {
     const { workId, question, learningMode, history = [] } = params;
     const notes: string[] = [];
 
-    // 1. Kiểm tra tài liệu active của tác phẩm
+    // 1. Kiểm tra tài liệu active của tác phẩm (sắp xếp created_at để cố định thứ tự [1], [2]...)
     const { rows: activeDocs } = await query<{
       id: string;
       title: string;
       document_role: string;
       doc_type: string;
+      reference_type?: string;
     }>(
-      `SELECT id, title, document_role, doc_type 
+      `SELECT id, title, document_role, doc_type, reference_type 
        FROM documents 
-       WHERE work_id = $1 AND is_active = true`,
+       WHERE work_id = $1 AND is_active = true
+       ORDER BY created_at ASC`,
       [workId]
     );
 
     const primaryDoc = activeDocs.find((d) => d.document_role === 'primary');
     const referenceDocs = activeDocs.filter((d) => d.document_role === 'reference');
+
+    // Ánh xạ từng tài liệu tham khảo với số thứ tự nguồn [1], [2]...
+    const refDocMap = new Map<string, { index: number; title: string; docType: string; refType?: string }>();
+    referenceDocs.forEach((d, idx) => {
+      refDocMap.set(d.id, {
+        index: idx + 1,
+        title: d.title,
+        docType: d.doc_type,
+        refType: d.reference_type,
+      });
+    });
 
     if (!primaryDoc && referenceDocs.length === 0) {
       return {
@@ -109,19 +125,30 @@ export class RetrievalService {
     });
 
     // 4. Lựa chọn Reference Chunks theo ngân sách (~4.200 tokens)
+    // Đánh số mã đoạn theo định dạng [Nguồn-Đoạn], ví dụ [1-R1], [1-R2], [2-R1]...
     const selectedRefChunks: RetrievedChunk[] = [];
     const excludedChunks: Array<{ chunkId: string; role: string; reason: string }> = [];
     let currentRefTokens = 0;
-    let refCounter = 1;
+    const docChunkCounter = new Map<string, number>();
 
     for (const item of scoredRefChunks) {
       const tokens = item.chunk.token_count || ChunkService.estimateVietnameseTokens(item.chunk.content);
       if (currentRefTokens + tokens <= this.BUDGET.REFERENCE) {
+        const docInfo = refDocMap.get(item.chunk.document_id);
+        const sourceIndex = docInfo ? docInfo.index : 1;
+        const chunkNum = (docChunkCounter.get(item.chunk.document_id) || 0) + 1;
+        docChunkCounter.set(item.chunk.document_id, chunkNum);
+
+        const chunkCode = `${sourceIndex}-R${chunkNum}`;
+
         selectedRefChunks.push({
-          code: `R${refCounter++}`,
+          code: chunkCode,
           chunkId: item.chunk.id,
           documentId: item.chunk.document_id,
-          documentTitle: (item.chunk as any).document_title || 'Tài liệu tham khảo',
+          documentTitle: (item.chunk as any).document_title || docInfo?.title || 'Tài liệu tham khảo',
+          sourceIndex,
+          sourceTag: `[${sourceIndex}]`,
+          chunkOrderInDoc: chunkNum,
           role: 'reference',
           order: item.chunk.chunk_order,
           content: item.chunk.content,
@@ -194,9 +221,20 @@ export class RetrievalService {
     }
 
     // 7. Dựng ngữ cảnh Prompt theo định dạng chuẩn hóa
-    const refContextLines = selectedRefChunks.map(
-      (r) => `[${r.code}] (${r.documentTitle}${r.sectionTitle ? ' - ' + r.sectionTitle : ''}):\n${r.content}`
-    );
+    // Phân nhóm tài liệu tham khảo theo [1], [2] và liệt kê các đoạn [1-R1], [1-R2], [2-R1]
+    const refContextLines: string[] = [];
+    referenceDocs.forEach((doc, idx) => {
+      const sourceNum = idx + 1;
+      const chunksForThisDoc = selectedRefChunks.filter((c) => c.documentId === doc.id);
+      if (chunksForThisDoc.length > 0) {
+        refContextLines.push(
+          `[Nguồn ${sourceNum}] "${doc.title}" (${doc.reference_type || 'Tài liệu hỗ trợ phân tích'}):\n` +
+          chunksForThisDoc
+            .map((c) => `  + [${c.code}] ${c.sectionTitle ? `(${c.sectionTitle}) ` : ''}:\n${c.content}`)
+            .join('\n\n')
+        );
+      }
+    });
 
     const primaryContextLines = selectedPrimaryChunks.map(
       (p) => `[${p.code}] (${p.documentTitle}${p.pageNumber ? ' - Trang ' + p.pageNumber : ''}):\n${p.content}`
@@ -205,7 +243,7 @@ export class RetrievalService {
     let promptContextText = '';
 
     if (refContextLines.length > 0) {
-      promptContextText += `--- TÀI LIỆU THAM KHẢO (Định hướng phân tích, luận điểm, kiến thức) ---\n` +
+      promptContextText += `--- NGUỒN HỖ TRỢ PHÂN TÍCH (Quy ước đánh số nguồn [1], [2],... và mã đoạn tương ứng [1-R1], [1-R2], [2-R1]...) ---\n` +
         refContextLines.join('\n\n') + '\n\n';
     }
 

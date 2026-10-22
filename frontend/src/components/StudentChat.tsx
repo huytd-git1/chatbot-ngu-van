@@ -108,6 +108,19 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
     return getWorkSuggestions(activeWork, learningMode);
   }, [activeWork, learningMode]);
 
+  const renderMessageText = (text: string) => {
+    try {
+      const parsedHtml = marked.parse(text) as string;
+      const formattedHtml = parsedHtml.replace(
+        /\[(\d+)-R(\d+)\]/g,
+        '<span class="inline-flex items-center px-1.5 py-0.2 mx-0.5 rounded bg-blue-100 text-blue-900 border border-blue-300 font-mono text-[11px] font-bold shadow-2xs select-none hover:bg-blue-200 transition-colors" title="Trích dẫn Nguồn [$1] - Đoạn R$2">[$1-R$2]</span>'
+      );
+      return DOMPurify.sanitize(formattedHtml, { ADD_ATTR: ['target', 'title'] });
+    } catch {
+      return DOMPurify.sanitize(marked.parse(text) as string);
+    }
+  };
+
   // Contextual suggestions: Prioritize follow-up suggestions from latest AI citation/answer, then teacher doc suggestions, then base suggestions
   const contextualSuggestions = useMemo(() => {
     const lastAiMsg = [...messages].reverse().find(m => m.sender === 'ai' && m.suggestions && m.suggestions.length > 0);
@@ -513,7 +526,7 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
                   <div
                     className="prose-cu-duong text-xs sm:text-sm"
                     dangerouslySetInnerHTML={{
-                      __html: DOMPurify.sanitize(marked.parse(msg.text) as string),
+                      __html: renderMessageText(msg.text),
                     }}
                   />
 
@@ -584,34 +597,62 @@ export const StudentChat: React.FC<StudentChatProps> = ({ works, quota, onRefres
 
                       {/* 2. NGUỒN HỖ TRỢ PHÂN TÍCH */}
                       {msg.referenceCitations && msg.referenceCitations.length > 0 && (
-                        <div className="bg-slate-50/90 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 shadow-2xs space-y-1.5">
+                        <div className="bg-slate-50/90 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 shadow-2xs space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
-                              <FileText className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                              <FileText className="w-3.5 h-3.5 text-blue-700 shrink-0" />
                               <span>Nguồn hỗ trợ phân tích ({msg.referenceCitations.length})</span>
                             </div>
                             <span className="text-[10px] text-slate-500 italic">
-                              Bổ trợ góc nhìn & lập luận (không trích nguyên tác)
+                              Đánh số [1], [2] tương ứng mã đoạn [1-R1], [2-R1]...
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                            {msg.referenceCitations.map((rc, rcIdx) => (
-                              <div key={rcIdx} className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between text-[11px]">
-                                <span className="font-medium text-slate-700 truncate pr-2" title={rc.documentTitle}>
-                                  {rc.documentTitle}
-                                </span>
-                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px]">
-                                  {rc.referenceType === 'lesson_plan'
-                                    ? 'Giáo án'
-                                    : rc.referenceType === 'context'
-                                    ? 'Bối cảnh'
-                                    : rc.referenceType === 'qa_guide'
-                                    ? 'Câu hỏi & đáp'
-                                    : 'Phân tích'}
-                                </span>
-                              </div>
-                            ))}
+                          <div className="grid grid-cols-1 gap-2 pt-1">
+                            {msg.referenceCitations.map((rc, rcIdx) => {
+                              const sourceTag = rc.sourceTag || `[${rc.sourceIndex || rcIdx + 1}]`;
+                              return (
+                                <div
+                                  key={rcIdx}
+                                  className="bg-white p-2.5 rounded-lg border border-slate-200 text-[11px] space-y-1.5 shadow-2xs"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-600 text-white font-mono text-[10px] font-bold shadow-2xs">
+                                        {sourceTag}
+                                      </span>
+                                      <span className="font-semibold text-slate-800 truncate" title={rc.documentTitle}>
+                                        {rc.documentTitle}
+                                      </span>
+                                    </div>
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-medium border border-slate-200">
+                                      {rc.referenceType === 'lesson_plan'
+                                        ? 'Giáo án'
+                                        : rc.referenceType === 'context'
+                                        ? 'Bối cảnh'
+                                        : rc.referenceType === 'qa_guide'
+                                        ? 'Câu hỏi & đáp'
+                                        : 'Phân tích'}
+                                    </span>
+                                  </div>
+
+                                  {/* List of cited chunks tags for this source */}
+                                  {rc.citedChunks && rc.citedChunks.length > 0 && (
+                                    <div className="flex items-center flex-wrap gap-1 pt-1 border-t border-slate-100">
+                                      <span className="text-[10px] text-slate-400 font-medium">Đoạn đã trích:</span>
+                                      {rc.citedChunks.map((code, cIdx) => (
+                                        <span
+                                          key={cIdx}
+                                          className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200 font-mono text-[10px] font-bold"
+                                        >
+                                          [{code}]
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}

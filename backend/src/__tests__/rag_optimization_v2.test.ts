@@ -128,13 +128,13 @@ Tô Hoài đồng cảm sâu sắc với số phận người phụ nữ miền 
 
     expect(retrieval.lackOfSource).toBe(false);
     expect(retrieval.referenceChunks.length).toBeGreaterThan(0);
-    expect(retrieval.referenceChunks[0].code).toMatch(/^R\d+$/);
+    expect(retrieval.referenceChunks[0].code).toMatch(/^(\d+-R\d+|R\d+)$/);
     expect(retrieval.primaryChunks.length).toBeGreaterThan(0);
     expect(retrieval.primaryChunks[0].code).toMatch(/^P\d+$/);
 
     // Kiểm tra tổng ngân sách token không vượt quá ngưỡng tối đa
     expect(retrieval.tokenBreakdown.totalInputEstimated).toBeLessThanOrEqual(RetrievalService.BUDGET.TOTAL_MAX);
-    expect(retrieval.promptContextText).toContain('[R1]');
+    expect(retrieval.promptContextText).toContain('[1-R1]');
     expect(retrieval.promptContextText).toContain('[P1]');
   });
 

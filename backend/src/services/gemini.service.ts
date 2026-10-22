@@ -22,9 +22,17 @@ export interface PrimaryCitationMeta {
 }
 
 export interface ReferenceCitationMeta {
+  sourceIndex?: number;
+  sourceTag?: string; // e.g. "[1]", "[2]"
   documentTitle: string;
   referenceType?: string | null;
   role: string;
+  citedChunks?: string[];
+  availableChunks?: Array<{
+    code: string;
+    sectionTitle?: string | null;
+    snippet: string;
+  }>;
 }
 
 export interface RagResult {
@@ -2060,31 +2068,48 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
 
     const primaryCitations: PrimaryCitationMeta[] = [];
     
-    // Parse which source codes [Rx] the model actually cited in the text
+    // Parse which source codes [1-R1], [2-R1], [Rx] or source tags [1], [2] the model actually cited in the text
+    const citedMatches = fullResponseText.match(/\[(\d+-R\d+|\d+|R\d+)\]/gi) || [];
     const usedRefCodes = new Set(
-      (fullResponseText.match(/\[R\d+\]/gi) || []).map((c) => c.toUpperCase().replace(/[\[\]]/g, ''))
+      citedMatches.map((c) => c.toUpperCase().replace(/[\[\]]/g, ''))
+    );
+    const usedSourceIndices = new Set(
+      (fullResponseText.match(/\[(\d+)\]/g) || []).map((c) => parseInt(c.replace(/[\[\]]/g, ''), 10))
     );
 
     const referenceCitations: ReferenceCitationMeta[] = [];
-    for (const r of referenceDocs || []) {
-      const isCodeUsed = retrievedChunks.some(
-        (c: any) => c.role === 'reference' && c.documentId === r.id && usedRefCodes.has(c.code)
+    (referenceDocs || []).forEach((r, i) => {
+      const sourceIndex = i + 1;
+      const docChunks = retrievedChunks.filter(
+        (c: any) => c.role === 'reference' && c.documentId === r.id
       );
-      const isTitleMentioned = fullResponseText.toLowerCase().includes(r.title.toLowerCase());
 
-      // Only cite if chunk code [Rx] was referenced, or document title was specifically referenced,
-      // or if no specific [Rx] was emitted but response is substantive and not a refusal
+      // Check which chunk codes of this document were cited in the text
+      const citedChunks = docChunks
+        .filter((c: any) => c.code && usedRefCodes.has(c.code.toUpperCase()))
+        .map((c: any) => c.code);
+
+      const isSourceNumCited = usedSourceIndices.has(sourceIndex);
+      const isTitleMentioned = fullResponseText.toLowerCase().includes(r.title.toLowerCase());
       const isRefusal = fullResponseText.toLowerCase().includes('chưa tìm thấy căn cứ') || 
                         fullResponseText.toLowerCase().includes('không tìm thấy trong tài liệu');
 
-      if (!isRefusal && (isCodeUsed || isTitleMentioned || (usedRefCodes.size === 0 && referenceDocs.length === 1))) {
+      if (!isRefusal && (citedChunks.length > 0 || isSourceNumCited || isTitleMentioned || (usedRefCodes.size === 0 && referenceDocs.length === 1))) {
         referenceCitations.push({
+          sourceIndex,
+          sourceTag: `[${sourceIndex}]`,
           documentTitle: r.title,
           referenceType: r.referenceType || 'analysis',
           role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
+          citedChunks: citedChunks.length > 0 ? citedChunks : docChunks.map((c: any) => c.code),
+          availableChunks: docChunks.map((c: any) => ({
+            code: c.code,
+            sectionTitle: c.sectionTitle || null,
+            snippet: (c.content || '').slice(0, 160),
+          })),
         });
       }
-    }
+    });
 
     let verifiedResponseText = fullResponseText;
     const blockquotes = Array.from(fullResponseText.matchAll(/>\s*["“]([^"”\n]+)["”]/g));
@@ -2309,7 +2334,9 @@ Giải đáp thấu đáo, rõ ràng, giàu hình ảnh và truyền cảm hứn
           documentContext += `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC ===\n${samplePara}`;
         }
         if (referenceDocs && referenceDocs.length > 0) {
-          const sampleRef = referenceDocs.map((d, i) => `[R${i + 1} - ${d.title}]:\n${(d.rawContent || '').slice(0, 1200)}`).join('\n\n');
+          const sampleRef = referenceDocs
+            .map((d, i) => `[Nguồn ${i + 1}] "${d.title}" (${d.referenceType || 'Tài liệu hỗ trợ phân tích'}):\n  + [${i + 1}-R1]:\n${(d.rawContent || '').slice(0, 1200)}`)
+            .join('\n\n');
           documentContext += `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH ===\n${sampleRef}`;
         }
       }
@@ -2334,8 +2361,10 @@ ${formattedHistory}
 1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC ([P]):
    - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ([P]) ở trên (đặt trong khối markdown > "...").
    - TUYỆT ĐỐI KHÔNG trích nguyên văn từ tài liệu tham khảo/phân tích giả mạo thành lời văn tác phẩm.
-2. SỬ DỤNG MÃ NGUỒN THAM KHẢO ([R]):
-   - Khi vận dụng luận điểm, kiến thức từ tài liệu tham khảo, hãy đánh dấu mã tương ứng như [R1], [R2].
+2. ĐÁNH DẤU CHÍNH XÁC NGUỒN HỖ TRỢ PHÂN TÍCH THEO MÃ [Nguồn-Đoạn] (VÍ DỤ [1-R1], [1-R2], [2-R1]...):
+   - Khi vận dụng luận điểm, nhận định, bối cảnh lịch sử, hoặc gợi mở từ tài liệu hỗ trợ phân tích nào, BẮT BUỘC phải ghi rõ mã nguồn và mã đoạn tương ứng ngay tại câu hoặc đoạn văn đó.
+   - Ví dụ: "...theo định hướng phân tích hình tượng nhân vật [1-R1], kết hợp với bối cảnh lịch sử xã hội [2-R1]...".
+   - TUYỆT ĐỐI KHÔNG đánh chung chung hoặc bỏ sót mã đoạn. Giúp học sinh nhận biết rõ từng ý kiến, luận điểm bổ trợ xuất phát từ nguồn [1], [2] nào và đoạn R1, R2 nào.
 3. NẾU THIẾU CĂN CỨ:
    - Nếu câu hỏi hoàn toàn xa lạ hoặc không có trong tài liệu bài học, hãy từ chối lịch sự bằng câu:
      "Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm '${workTitle}', cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!"
@@ -2567,7 +2596,9 @@ ${formattedHistory}
               documentContext += `\n\n=== 1. VĂN BẢN TÁC PHẨM GỐC ===\n${samplePara}`;
             }
             if (referenceDocs && referenceDocs.length > 0) {
-              const sampleRef = referenceDocs.map((d, i) => `[R${i + 1} - ${d.title}]:\n${(d.rawContent || '').slice(0, 1200)}`).join('\n\n');
+              const sampleRef = referenceDocs
+                .map((d, i) => `[Nguồn ${i + 1}] "${d.title}" (${d.referenceType || 'Tài liệu hỗ trợ phân tích'}):\n  + [${i + 1}-R1]:\n${(d.rawContent || '').slice(0, 1200)}`)
+                .join('\n\n');
               documentContext += `\n\n=== 2. TÀI LIỆU THAM KHẢO & PHÂN TÍCH ===\n${sampleRef}`;
             }
           }
@@ -2592,8 +2623,10 @@ ${formattedHistory}
 1. CHỈ TRÍCH NGUYÊN VĂN TỪ VĂN BẢN TÁC PHẨM GỐC ([P]):
    - Khi đưa ra dẫn chứng trực tiếp, cô BẮT BUỘC phải trích NGUYÊN VĂN từ VĂN BẢN TÁC PHẨM GỐC ([P]) ở trên (đặt trong khối markdown > "...").
    - TUYỆT ĐỐI KHÔNG trích nguyên văn từ tài liệu tham khảo/phân tích giả mạo thành lời văn tác phẩm.
-2. SỬ DỤNG MÃ NGUỒN THAM KHẢO ([R]):
-   - Khi vận dụng luận điểm, kiến thức từ tài liệu tham khảo, hãy đánh dấu mã tương ứng như [R1], [R2].
+2. ĐÁNH DẤU CHÍNH XÁC NGUỒN HỖ TRỢ PHÂN TÍCH THEO MÃ [Nguồn-Đoạn] (VÍ DỤ [1-R1], [1-R2], [2-R1]...):
+   - Khi vận dụng luận điểm, nhận định, bối cảnh lịch sử, hoặc gợi mở từ tài liệu hỗ trợ phân tích nào, BẮT BUỘC phải ghi rõ mã nguồn và mã đoạn tương ứng ngay tại câu hoặc đoạn văn đó.
+   - Ví dụ: "...theo định hướng phân tích hình tượng nhân vật [1-R1], kết hợp với bối cảnh lịch sử xã hội [2-R1]...".
+   - TUYỆT ĐỐI KHÔNG đánh chung chung hoặc bỏ sót mã đoạn. Giúp học sinh nhận biết rõ từng ý kiến, luận điểm bổ trợ xuất phát từ nguồn [1], [2] nào và đoạn R1, R2 nào.
 3. NẾU THIẾU CĂN CỨ:
    - Nếu câu hỏi hoàn toàn xa lạ hoặc không có trong tài liệu bài học, hãy từ chối lịch sự bằng câu:
      "Chào em! Hiện tại trong các tài liệu giáo viên đã cung cấp cho tác phẩm '${workTitle}', cô chưa tìm thấy căn cứ xác thực để giải đáp câu hỏi này. Cô trò mình cần tôn trọng căn cứ tác phẩm và tài liệu chính thống, em hãy trao đổi thêm với giáo viên phụ trách nhé!"
@@ -2997,6 +3030,10 @@ ${formattedHistory}
         `Chi tiết đắt giá này giúp chúng ta cảm nhận sâu sắc bối cảnh cuộc sống cũng như diễn biến tâm lý và phẩm chất của nhân vật. Em hãy chú ý khai thác chi tiết này khi làm bài văn phân tích nhé!`;
     }
 
+    if (referenceDocs.length > 0) {
+      responseText += `\n\n*Theo tài liệu hỗ trợ phân tích [1-R1], tác phẩm còn gợi mở nhiều tầng ý nghĩa bổ trợ sâu sắc cho học sinh khi làm bài.*`;
+    }
+
     const primaryCitations: PrimaryCitationMeta[] = [];
     if (primaryDoc) {
       primaryCitations.push({
@@ -3010,11 +3047,23 @@ ${formattedHistory}
       });
     }
 
-    const referenceCitations: ReferenceCitationMeta[] = referenceDocs.map((r) => ({
-      documentTitle: r.title,
-      referenceType: r.referenceType || 'analysis',
-      role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
-    }));
+    const referenceCitations: ReferenceCitationMeta[] = referenceDocs.map((r, i) => {
+      const sourceIndex = i + 1;
+      return {
+        sourceIndex,
+        sourceTag: `[${sourceIndex}]`,
+        documentTitle: r.title,
+        referenceType: r.referenceType || 'analysis',
+        role: 'Nguồn bổ trợ phân tích & ngữ cảnh',
+        citedChunks: [`${sourceIndex}-R1`],
+        availableChunks: [
+          {
+            code: `${sourceIndex}-R1`,
+            snippet: (r.rawContent || '').slice(0, 160),
+          },
+        ],
+      };
+    });
 
     const legacyCitations: FileCitationMeta[] = [];
     if (primaryCitations.length > 0) {

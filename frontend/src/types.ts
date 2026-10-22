@@ -65,9 +65,17 @@ export interface PrimaryCitation {
 }
 
 export interface ReferenceCitation {
+  sourceIndex?: number;
+  sourceTag?: string; // e.g. "[1]", "[2]"
   documentTitle: string;
   referenceType?: string | null;
   role: string;
+  citedChunks?: string[];
+  availableChunks?: Array<{
+    code: string;
+    sectionTitle?: string | null;
+    snippet: string;
+  }>;
 }
 
 export interface ParagraphItem {
