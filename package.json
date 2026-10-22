@@ -13,6 +13,8 @@
     "build:backend": "npm run build --prefix backend",
     "build": "npm run build:frontend && npm run build:backend",
     "test": "npm test --prefix backend",
+    "test:load": "docker run --rm -i -v \"${PWD}/tests/k6:/scripts\" grafana/k6 run /scripts/stress-test.js",
+    "test:load:smoke": "docker run --rm -i -v \"${PWD}/tests/k6:/scripts\" grafana/k6 run /scripts/smoke-test.js",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
     "dev": "npm run dev:backend",
