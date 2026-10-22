@@ -15,13 +15,13 @@ export function getDb(): IDbPool {
   if (dbInstance) return dbInstance;
 
   if (env.DATABASE_URL && env.DATABASE_URL !== 'memory') {
-    const isProd = env.NODE_ENV === 'production';
+    const isRemote = !env.DATABASE_URL.includes('localhost') && !env.DATABASE_URL.includes('127.0.0.1');
     const pool = new pg.Pool({
       connectionString: env.DATABASE_URL,
-      ssl: isProd && !env.DATABASE_URL.includes('localhost') ? { rejectUnauthorized: false } : undefined,
+      ssl: isRemote ? { rejectUnauthorized: false } : undefined,
       max: 20,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 30000,
     });
 
     pool.on('error', (err) => {

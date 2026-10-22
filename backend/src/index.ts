@@ -7,32 +7,49 @@ import { DocumentService } from './services/document.service.js';
 import { GeminiService } from './services/gemini.service.js';
 
 async function bootstrap() {
+  const port = Number(env.PORT) || 4000;
+  const host = '0.0.0.0';
+
   try {
-    console.log(`[Server] Khởi động "Cô Dương dạy văn dễ thương" trên cổng ${env.PORT}...`);
+    console.log(`[Server] Khởi động "Cô Dương dạy văn dễ thương" trên ${host}:${port}...`);
 
     // 1. Run migrations & auto seed if users table is empty
-    await runMigrations();
     try {
-      const { rows: userRows } = await query(`SELECT COUNT(*) as count FROM users`);
-      if (parseInt(userRows[0]?.count || '0', 10) === 0) {
-        console.log('[Server] Chưa có tài khoản, tự động nạp dữ liệu mẫu ban đầu...');
-        await seedDatabase();
+      await runMigrations();
+      try {
+        const { rows: userRows } = await query(`SELECT COUNT(*) as count FROM users`);
+        if (parseInt(userRows[0]?.count || '0', 10) === 0) {
+          console.log('[Server] Chưa có tài khoản, tự động nạp dữ liệu mẫu ban đầu...');
+          await seedDatabase();
+        }
+      } catch (seedErr) {
+        if (env.DATABASE_URL === 'memory') {
+          await seedDatabase();
+        } else {
+          console.warn('[Server] Kiểm tra tài khoản ban đầu:', seedErr);
+        }
       }
-    } catch {
-      if (env.DATABASE_URL === 'memory') {
-        await seedDatabase();
-      }
+    } catch (dbErr) {
+      console.error('[Server] Cảnh báo lỗi khởi tạo Database (server vẫn tiếp tục khởi động):', dbErr);
     }
 
     // 2. Load dynamic AI settings
-    await GeminiService.initFromDb();
+    try {
+      await GeminiService.initFromDb();
+    } catch (aiErr) {
+      console.warn('[Server] Cảnh báo khởi tạo AI settings từ database:', aiErr);
+    }
 
     // 3. Reconcile unfinished background indexing jobs
-    await DocumentService.reconcilePendingJobs();
+    try {
+      await DocumentService.reconcilePendingJobs();
+    } catch (docErr) {
+      console.warn('[Server] Cảnh báo kiểm tra indexing jobs:', docErr);
+    }
 
-    // 3. Start server
-    const server = app.listen(env.PORT, () => {
-      console.log(`[Server] Ứng dụng đã sẵn sàng tại: http://localhost:${env.PORT}`);
+    // 4. Start server (Binding to 0.0.0.0 is required for Render / Docker / Cloud)
+    const server = app.listen(port, host, () => {
+      console.log(`[Server] Ứng dụng đã sẵn sàng tại: http://${host}:${port}`);
       console.log(`[Server] Chế độ môi trường: ${env.NODE_ENV}`);
       console.log(`[Server] Kho RAG Gemini File Search: ${env.GEMINI_API_KEY ? 'Đã kết nối API thật' : 'Chế độ mô phỏng kiểm thử (Mock Mode)'}`);
     });

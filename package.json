@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Chatbot RAG hỗ trợ học Ngữ văn - Cô Dương dạy văn dễ thương",
   "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
     "install:all": "npm install --prefix backend && npm install --prefix frontend",
     "build:frontend": "npm run build --prefix frontend",
