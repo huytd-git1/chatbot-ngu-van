@@ -1623,6 +1623,19 @@ export class GeminiService {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 120000);
 
+          const requestBody: Record<string, any> = {
+            model: modelToUse,
+            messages,
+            temperature: 0.7,
+          };
+
+          // Không giới hạn max_tokens để model tự do trả lời đầy đủ, không bị ngắt cụt câu trả lời.
+          // Cho phép tuỳ biến nếu có biến môi trường MAX_OUTPUT_TOKENS.
+          const envMaxTokens = process.env.MAX_OUTPUT_TOKENS || process.env.THIRD_PARTY_MAX_TOKENS;
+          if (envMaxTokens && parseInt(envMaxTokens, 10) > 0) {
+            requestBody.max_tokens = parseInt(envMaxTokens, 10);
+          }
+
           const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
@@ -1630,12 +1643,7 @@ export class GeminiService {
               Authorization: `Bearer ${currentKey.trim()}`,
               'x-api-key': currentKey.trim(),
             },
-            body: JSON.stringify({
-              model: modelToUse,
-              messages,
-              max_tokens: 3500,
-              temperature: 0.7,
-            }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal,
           });
 
