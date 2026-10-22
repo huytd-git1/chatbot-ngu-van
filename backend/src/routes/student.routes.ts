@@ -5,10 +5,11 @@ import { authMiddleware, requireRole } from '../middlewares/auth.middleware.js';
 
 export const studentRouter = Router();
 
-// Chat rate limiter: max 30 questions per 5 minutes per user/IP (admin & test teacher exempt)
+// Chat rate limiter: max 40 questions per 5 minutes per user (keyed by user ID, not shared classroom IP)
 const chatLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
-  max: 30,
+  max: 40,
+  keyGenerator: (req: any) => req.user?.id || req.ip,
   message: { error: 'Bạn thao tác quá nhanh. Vui lòng chậm lại một chút để suy ngẫm nhé!' },
   standardHeaders: true,
   legacyHeaders: false,

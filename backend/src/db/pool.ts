@@ -19,9 +19,9 @@ export function getDb(): IDbPool {
     const pool = new pg.Pool({
       connectionString: env.DATABASE_URL,
       ssl: isRemote ? { rejectUnauthorized: false } : undefined,
-      max: 10,
+      max: 15,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: 20000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
     });

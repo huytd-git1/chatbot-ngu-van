@@ -5,10 +5,10 @@ import { authMiddleware } from '../middlewares/auth.middleware.js';
 
 export const authRouter = Router();
 
-// Rate limit login attempts: max 15 requests per minute per IP
+// Rate limit login attempts: max 100 requests per minute per IP (accommodating classroom NAT)
 const loginLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 15,
+  max: 100,
   message: { error: 'Quá nhiều yêu cầu đăng nhập từ mạng này. Vui lòng thử lại sau 1 phút.' },
   standardHeaders: true,
   legacyHeaders: false,

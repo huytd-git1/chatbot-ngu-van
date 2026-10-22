@@ -31,15 +31,24 @@ export interface SessionRow {
   ip_address: string | null;
 }
 
+interface CachedSession {
+  user: UserRow;
+  session: SessionRow;
+  expiresAtMs: number;
+}
+
+const sessionCache = new Map<string, CachedSession>();
+const lastActiveUpdateMap = new Map<string, number>();
+
 export class AuthService {
   /**
-   * Hashes a password with Argon2id using safe parameters
+   * Hashes a password with Argon2id using safe parameters (19MB per OWASP for cloud containers)
    */
   static async hashPassword(password: string): Promise<string> {
     return argon2.hash(password, {
       type: argon2.argon2id,
-      memoryCost: 65536, // 64 MB
-      timeCost: 3,
+      memoryCost: 19456, // 19 MB (OWASP recommended for cloud/container environments to prevent OOM)
+      timeCost: 2,
       parallelism: 1,
     });
   }
@@ -72,9 +81,16 @@ export class AuthService {
   }
 
   /**
-   * Validates a session ID and returns the user if active and unexpired
+   * Validates a session ID and returns the user if active and unexpired.
+   * Utilizes a short in-memory cache (15s) to prevent database connection spikes when multiple users load pages.
    */
   static async validateSession(sessionId: string): Promise<{ user: UserRow; session: SessionRow } | null> {
+    const now = Date.now();
+    const cached = sessionCache.get(sessionId);
+    if (cached && now < cached.expiresAtMs) {
+      return { user: cached.user, session: cached.session };
+    }
+
     const { rows } = await query<UserRow & SessionRow & { session_id: string }>(
       `SELECT u.*, s.id as session_id, s.expires_at, s.revoked
        FROM sessions s
@@ -83,12 +99,19 @@ export class AuthService {
       [sessionId]
     );
 
-    if (rows.length === 0) return null;
+    if (rows.length === 0) {
+      sessionCache.delete(sessionId);
+      return null;
+    }
 
     const row = rows[0];
 
-    // Refresh last_active_at periodically
-    query(`UPDATE sessions SET last_active_at = NOW() WHERE id = $1`, [sessionId]).catch(() => {});
+    // Throttle last_active_at updates to once every 5 minutes per session to prevent DB lock contention
+    const lastUpdate = lastActiveUpdateMap.get(sessionId) || 0;
+    if (now - lastUpdate > 5 * 60 * 1000) {
+      lastActiveUpdateMap.set(sessionId, now);
+      query(`UPDATE sessions SET last_active_at = NOW() WHERE id = $1`, [sessionId]).catch(() => {});
+    }
 
     const user: UserRow = {
       id: row.id,
@@ -118,6 +141,9 @@ export class AuthService {
       ip_address: row.ip_address,
     };
 
+    // Cache valid session for 15 seconds
+    sessionCache.set(sessionId, { user, session, expiresAtMs: now + 15000 });
+
     return { user, session };
   }
 
@@ -125,6 +151,8 @@ export class AuthService {
    * Revokes a specific session
    */
   static async revokeSession(sessionId: string): Promise<void> {
+    sessionCache.delete(sessionId);
+    lastActiveUpdateMap.delete(sessionId);
     await query(`UPDATE sessions SET revoked = TRUE WHERE id = $1`, [sessionId]);
   }
 
@@ -132,6 +160,8 @@ export class AuthService {
    * Revokes all sessions for a user (e.g. after password change, lockout or role modification)
    */
   static async revokeAllUserSessions(userId: string): Promise<void> {
+    sessionCache.clear();
+    lastActiveUpdateMap.clear();
     await query(`UPDATE sessions SET revoked = TRUE WHERE user_id = $1`, [userId]);
   }
 
