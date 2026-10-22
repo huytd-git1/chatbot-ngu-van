@@ -20,7 +20,7 @@ services:
       - key: SESSION_SECRET
         generateValue: true
       - key: DATABASE_URL
-        value: memory # Mặc định in-memory để chạy ngay lập tức; dán connection string PostgreSQL vào Environment khi cần lưu trữ lâu dài
+        sync: false # Render giữ nguyên chuỗi kết nối PostgreSQL người dùng đã cấu hình trong Dashboard, không ghi đè thành memory
       - key: GEMINI_API_KEY
         value: "" # Nhập trực tiếp trên web tại trang Admin sau khi mở
       - key: GEMINI_MODEL

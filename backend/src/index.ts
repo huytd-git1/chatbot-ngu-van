@@ -11,7 +11,16 @@ async function bootstrap() {
   const host = '0.0.0.0';
 
   try {
+    const isMemory = env.DATABASE_URL === 'memory';
+    const dbDisplay = isMemory
+      ? 'In-Memory (pg-mem - Bộ nhớ RAM tạm thời, KHÔNG lưu lâu dài)'
+      : `PostgreSQL (${env.DATABASE_URL.replace(/:[^:@]+@/, ':****@')})`;
+
     console.log(`[Server] Khởi động "Cô Dương dạy văn dễ thương" trên ${host}:${port}...`);
+    console.log(`[Server] Cơ sở dữ liệu: ${dbDisplay}`);
+    if (isMemory) {
+      console.warn('[Server] LƯU Ý: Web đang dùng bộ nhớ RAM tạm thời (DATABASE_URL=memory). Dữ liệu sẽ mất khi restart! Hãy cấu hình DATABASE_URL trỏ tới PostgreSQL trong Render Environment để lưu trữ lâu dài.');
+    }
 
     // 1. Run migrations & auto seed if users table is empty
     try {
