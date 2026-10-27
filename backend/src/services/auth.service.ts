@@ -148,6 +148,28 @@ export class AuthService {
   }
 
   /**
+   * Invalidates cached sessions for a specific user ID
+   */
+  static invalidateUserCache(userId: string): void {
+    for (const [key, val] of sessionCache.entries()) {
+      if (val.user.id === userId) {
+        sessionCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Invalidates a specific session ID from cache
+   */
+  static invalidateSessionCache(sessionId?: string): void {
+    if (sessionId) {
+      sessionCache.delete(sessionId);
+    } else {
+      sessionCache.clear();
+    }
+  }
+
+  /**
    * Revokes a specific session
    */
   static async revokeSession(sessionId: string): Promise<void> {

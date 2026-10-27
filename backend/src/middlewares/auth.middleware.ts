@@ -39,12 +39,14 @@ export function authMiddleware(required = true) {
 
       // If user must change password and is accessing other endpoints, block
       const fullUrl = req.originalUrl || (req.baseUrl + req.path);
+      const pathOnly = req.baseUrl ? (req.baseUrl + req.path) : req.path;
       const isAllowedEndpoint =
+        pathOnly.includes('change-password') ||
+        pathOnly.includes('logout') ||
+        pathOnly.includes('/me') ||
         fullUrl.includes('change-password') ||
         fullUrl.includes('logout') ||
-        fullUrl.endsWith('/me') ||
-        req.path.includes('change-password') ||
-        req.path.includes('logout');
+        fullUrl.includes('/me');
 
       if (auth.user.must_change_password && !isAllowedEndpoint) {
         res.status(403).json({

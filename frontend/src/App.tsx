@@ -99,11 +99,11 @@ export const App: React.FC = () => {
     await loadUserData(loggedInUser);
   };
 
-  const handlePasswordChangeSuccess = async () => {
+  const handlePasswordChangeSuccess = async (updatedUserFromApi?: User) => {
     setIsChangePasswordOpen(false);
     setIsForcedPasswordChange(false);
-    if (user) {
-      const updatedUser = { ...user, mustChangePassword: false };
+    const updatedUser = updatedUserFromApi || (user ? { ...user, mustChangePassword: false } : null);
+    if (updatedUser) {
       setUser(updatedUser);
       await loadUserData(updatedUser);
     }

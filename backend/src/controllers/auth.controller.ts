@@ -189,7 +189,25 @@ export class AuthController {
       await query(`UPDATE sessions SET revoked = TRUE WHERE user_id = $1 AND id != $2`, [req.user.id, currentSessionId]);
     }
 
-    res.status(200).json({ message: 'Đổi mật khẩu thành công.' });
+    // Immediately invalidate user and session in memory cache
+    AuthService.invalidateUserCache(req.user.id);
+    if (currentSessionId) {
+      AuthService.invalidateSessionCache(currentSessionId);
+    }
+    req.user.must_change_password = false;
+
+    res.status(200).json({
+      message: 'Đổi mật khẩu thành công.',
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        fullName: req.user.full_name,
+        role: req.user.role,
+        isTestTeacher: req.user.is_test_teacher,
+        mustChangePassword: false,
+        totpEnabled: req.user.totp_enabled,
+      },
+    });
   }
 
   static async setupTotp(req: Request, res: Response): Promise<void> {
@@ -250,6 +268,8 @@ export class AuthController {
       [JSON.stringify(hashedCodes), req.user.id]
     );
 
+    AuthService.invalidateUserCache(req.user.id);
+
     res.status(200).json({ message: 'Đã kích hoạt xác thực 2 bước (TOTP) thành công.' });
   }
 
@@ -265,6 +285,8 @@ export class AuthController {
        WHERE id = $1`,
       [req.user.id]
     );
+
+    AuthService.invalidateUserCache(req.user.id);
 
     res.status(200).json({ message: 'Đã tắt xác thực 2 bước.' });
   }

@@ -6,7 +6,7 @@ interface ChangePasswordModalProps {
   isOpen: boolean;
   isForced: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedUser?: any) => void;
 }
 
 export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
@@ -39,12 +39,12 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
 
     setLoading(true);
     try {
-      await apiRequest('/api/auth/change-password', {
+      const res = await apiRequest<{ message: string; user?: any }>('/api/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({ oldPassword, newPassword }),
       });
       alert('Đổi mật khẩu thành công!');
-      onSuccess();
+      onSuccess(res.user);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Không thể đổi mật khẩu.');
