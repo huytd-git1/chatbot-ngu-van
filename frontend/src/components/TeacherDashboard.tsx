@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Download, RefreshCw, Lock, Unlock,
   KeyRound, Shield, FileText, CheckCircle2, AlertCircle, Trash2, Award, Calendar,
-  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info, Upload, Sparkles
+  Star, Eye, AlertTriangle, GitCompare, BookOpen, Check, Layers, X, Info, Upload, Sparkles,
+  Users, Plus
 } from 'lucide-react';
 import type { ClassItem, StudentItem, Work, DocumentItem, ParagraphItem, DocumentDiffReport } from '../types.js';
 import { apiRequest } from '../api/client.js';
@@ -269,6 +270,7 @@ export const TeacherDashboard: React.FC = () => {
     e.preventDefault();
     if (!newWorkTitle.trim() || !newWorkAuthor.trim()) return;
     try {
+      const matchingClasses = classes.filter((c) => c.grade === newWorkGrade).map((c) => c.id);
       await apiRequest('/api/teacher/works', {
         method: 'POST',
         body: JSON.stringify({
@@ -276,7 +278,7 @@ export const TeacherDashboard: React.FC = () => {
           author: newWorkAuthor,
           grade: newWorkGrade,
           description: newWorkDesc,
-          assignedClassIds: [selectedClassId].filter(Boolean),
+          assignedClassIds: matchingClasses.length > 0 ? matchingClasses : [selectedClassId].filter(Boolean),
         }),
       });
       setNewWorkTitle('');
@@ -286,6 +288,29 @@ export const TeacherDashboard: React.FC = () => {
       alert('Tạo tác phẩm thành công.');
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleToggleClassAccess = async (classId: string) => {
+    const activeWork = works.find((w) => w.id === selectedWorkId);
+    if (!activeWork) return;
+
+    const currentAssigned = activeWork.assignedClassIds || [];
+    const isAssigned = currentAssigned.includes(classId);
+    const newAssigned = isAssigned
+      ? currentAssigned.filter((id) => id !== classId)
+      : [...currentAssigned, classId];
+
+    try {
+      await apiRequest(`/api/teacher/works/${selectedWorkId}/classes`, {
+        method: 'PUT',
+        body: JSON.stringify({ classIds: newAssigned }),
+      });
+      setWorks((prev) =>
+        prev.map((w) => (w.id === selectedWorkId ? { ...w, assignedClassIds: newAssigned } : w))
+      );
+    } catch (err: any) {
+      alert(err.message || 'Lỗi khi cập nhật phân quyền lớp.');
     }
   };
 
@@ -927,6 +952,46 @@ export const TeacherDashboard: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Phân quyền lớp học được phép tiếp cận tác phẩm */}
+            {selectedWorkId && (
+              <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200/80 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="text-xs font-bold text-[#0f2942] flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-amber-700" />
+                    Phân quyền lớp học được phép truy cập tác phẩm này:
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    (Bấm vào lớp để cấp hoặc hủy quyền cho học sinh xem tác phẩm)
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {classes.map((c) => {
+                    const activeWork = works.find((w) => w.id === selectedWorkId);
+                    const isGranted = activeWork?.assignedClassIds?.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleToggleClassAccess(c.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                          isGranted
+                            ? 'bg-emerald-600 border-emerald-600 text-white'
+                            : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                        }`}
+                        title={isGranted ? 'Bấm để hủy quyền lớp này' : 'Bấm để cấp quyền cho lớp này'}
+                      >
+                        {isGranted ? <Check className="w-3.5 h-3.5 text-white" /> : <Plus className="w-3.5 h-3.5 text-slate-400" />}
+                        <span>{c.name} (Khối {c.grade})</span>
+                      </button>
+                    );
+                  })}
+                  {classes.length === 0 && (
+                    <span className="text-xs text-slate-400">Chưa có lớp học nào trong hệ thống.</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Upload form with Role & Subtype Selection */}
             <form onSubmit={handleUploadDoc} className="p-3.5 rounded-xl bg-[#fbf9f4] border border-[#e8e2d5] space-y-2.5">
