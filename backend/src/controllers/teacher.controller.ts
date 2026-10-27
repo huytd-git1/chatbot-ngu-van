@@ -169,6 +169,14 @@ export class TeacherController {
       [req.user.id, newClassId]
     );
 
+    // Automatically grant all active works of the same grade to the newly created class
+    await query(
+      `INSERT INTO class_work_access (class_id, work_id, granted_by)
+       SELECT $1, id, $2 FROM works WHERE grade = $3 AND status = 'active'
+       ON CONFLICT DO NOTHING`,
+      [newClassId, req.user.id, grade]
+    );
+
     res.status(201).json({ message: 'Tạo lớp học thành công.', classId: newClassId });
   }
 
@@ -456,7 +464,17 @@ export class TeacherController {
     );
     const workId = rows[0].id;
 
-    for (const classId of assignedClassIds) {
+    // Determine classes to grant: explicit assignedClassIds + all classes of this grade if none specified
+    let targetClassIds = [...assignedClassIds];
+    if (targetClassIds.length === 0) {
+      const classRows = await query<{ id: string }>(
+        `SELECT id FROM classes WHERE grade = $1`,
+        [grade]
+      );
+      targetClassIds = classRows.rows.map(r => r.id);
+    }
+
+    for (const classId of targetClassIds) {
       await query(
         `INSERT INTO class_work_access (class_id, work_id, granted_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [classId, workId, req.user.id]

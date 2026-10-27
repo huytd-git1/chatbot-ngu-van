@@ -42,16 +42,28 @@ export class StudentController {
         ORDER BY w.grade, w.title
       `;
     } else {
-      // Find student's class
-      const stRes = await query<{ class_id: string }>(
-        `SELECT class_id FROM students WHERE user_id = $1`,
+      // Find student's class and grade
+      const stRes = await query<{ class_id: string; grade: number }>(
+        `SELECT s.class_id, c.grade
+         FROM students s
+         JOIN classes c ON s.class_id = c.id
+         WHERE s.user_id = $1`,
         [req.user.id]
       );
       if (stRes.rows.length === 0) {
         res.status(403).json({ error: 'Học sinh chưa được phân vào lớp học nào.' });
         return;
       }
-      const classId = stRes.rows[0].class_id;
+      const { class_id: classId, grade: classGrade } = stRes.rows[0];
+
+      // Auto-heal / Ensure default access for the student's class to works of their grade
+      await query(
+        `INSERT INTO class_work_access (class_id, work_id)
+         SELECT $1, w.id FROM works w
+         WHERE w.grade = $2 AND w.status = 'active'
+         ON CONFLICT DO NOTHING`,
+        [classId, classGrade]
+      );
 
       worksQuery = `
         SELECT w.id, w.title, w.author, w.grade, w.description, w.status,
@@ -123,15 +135,25 @@ export class StudentController {
       }
       classId = studentRes.rows[0].class_id;
 
-      // Check class_work_access
+      // Check class_work_access or matching grade
       const accessRes = await query(
-        `SELECT id FROM class_work_access WHERE class_id = $1 AND work_id = $2`,
+        `SELECT 1 FROM works w
+         JOIN classes c ON c.id = $1
+         LEFT JOIN class_work_access cwa ON w.id = cwa.work_id AND cwa.class_id = $1
+         WHERE w.id = $2 AND w.status = 'active'
+           AND (cwa.class_id IS NOT NULL OR w.grade = c.grade)`,
         [classId, workId]
       );
       if (accessRes.rows.length === 0) {
         res.status(403).json({ error: 'Lớp học của em chưa được giáo viên cấp quyền truy cập tác phẩm này.' });
         return;
       }
+
+      // Ensure class_work_access has record
+      await query(
+        `INSERT INTO class_work_access (class_id, work_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [classId, workId]
+      );
     }
 
     // 2. Atomically reserve quota

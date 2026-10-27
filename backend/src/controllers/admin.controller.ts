@@ -221,8 +221,17 @@ export class AdminController {
         `INSERT INTO classes (name, grade, academic_year) VALUES ($1, $2, $3) RETURNING id`,
         [name, grade, academicYear]
       );
+      const newClassId = rows[0].id;
 
-      res.status(201).json({ message: 'Tạo lớp học thành công.', classId: rows[0].id });
+      // Automatically grant all active works of the same grade to the newly created class
+      await query(
+        `INSERT INTO class_work_access (class_id, work_id, granted_by)
+         SELECT $1, id, $2 FROM works WHERE grade = $3 AND status = 'active'
+         ON CONFLICT DO NOTHING`,
+        [newClassId, req.user?.id || null, grade]
+      );
+
+      res.status(201).json({ message: 'Tạo lớp học thành công.', classId: newClassId });
     } catch (err: any) {
       console.error('Error in AdminController.createClass:', err);
       res.status(500).json({ error: 'Không thể tạo lớp học.' });
